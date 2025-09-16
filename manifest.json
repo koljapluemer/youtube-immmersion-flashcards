@@ -1,0 +1,16 @@
+{
+  "manifest_version": 3,
+  "name": "YouTube Video Button",
+  "version": "1.0",
+  "description": "Adds a button next to YouTube video titles that shows an alert when clicked",
+  "permissions": [
+    "activeTab"
+  ],
+  "content_scripts": [
+    {
+      "matches": ["*://www.youtube.com/*"],
+      "js": ["content.js"],
+      "run_at": "document_end"
+    }
+  ]
+}
