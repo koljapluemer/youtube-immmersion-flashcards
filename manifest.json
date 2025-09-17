@@ -3,7 +3,7 @@
   "name": "YouTube Video Button",
   "version": "1.0",
   "description": "Adds a button next to YouTube video titles that shows subtitles when clicked",
-  "permissions": ["*://*.youtube.com/*"],
+  "permissions": ["*://*.youtube.com/*", "storage"],
   "web_accessible_resources": ["injected.js"],
   "content_scripts": [
     {

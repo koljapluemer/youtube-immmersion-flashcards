@@ -35,10 +35,14 @@ function addButtonToVideo() {
     display: inline-block;
   `;
 
-  button.addEventListener('click', (e) => {
+  button.addEventListener('click', async (e) => {
     e.preventDefault();
     e.stopPropagation();
-    getSubtitles();
+
+    const apiKey = await ensureOpenAIKey();
+    if (apiKey) {
+      getSubtitles();
+    }
   });
 
   videoTitle.parentElement.insertBefore(button, videoTitle);
@@ -144,6 +148,40 @@ let currentSubtitleIndex = 0;
 let subtitlesArray = [];
 let videoElement = null;
 let originalVideoContainer = null;
+
+async function ensureOpenAIKey() {
+  // Try to get existing key from chrome storage
+  const result = await new Promise((resolve) => {
+    chrome.storage.local.get(['openai_api_key'], resolve);
+  });
+
+  if (result.openai_api_key) {
+    console.log('OpenAI API key found in storage');
+    return result.openai_api_key;
+  }
+
+  // Prompt user for API key
+  const apiKey = prompt('Please enter your OpenAI API key:');
+
+  if (!apiKey || apiKey.trim() === '') {
+    alert('OpenAI API key is required to use this feature');
+    return null;
+  }
+
+  // Validate API key format (starts with sk-)
+  if (!apiKey.startsWith('sk-')) {
+    alert('Invalid OpenAI API key format. Keys should start with "sk-"');
+    return null;
+  }
+
+  // Store the key securely in chrome storage
+  await new Promise((resolve) => {
+    chrome.storage.local.set({ 'openai_api_key': apiKey }, resolve);
+  });
+
+  console.log('OpenAI API key saved to storage');
+  return apiKey;
+}
 
 function createSubtitleUI(timedSubtitles) {
   subtitlesArray = timedSubtitles;
