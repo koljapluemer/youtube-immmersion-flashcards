@@ -1,14 +1,29 @@
 {
-  "manifest_version": 2,
+  "manifest_version": 3,
   "name": "YouTube Video Button",
   "version": "1.0",
   "description": "Adds a button next to YouTube video titles that shows subtitles when clicked",
-  "permissions": ["*://*.youtube.com/*", "storage"],
-  "web_accessible_resources": ["injected.js"],
+  "permissions": ["storage"],
+  "host_permissions": ["*://*.youtube.com/*"],
+  "web_accessible_resources": [
+    {
+      "resources": ["injected.js"],
+      "matches": ["*://*.youtube.com/*"]
+    }
+  ],
   "content_scripts": [
     {
       "matches": ["*://*.youtube.com/*"],
-      "js": ["content.js"],
+      "js": [
+        "src/config/constants.js",
+        "src/core/api-key-manager.js",
+        "src/utils/youtube-helpers.js",
+        "src/core/subtitle-extractor.js",
+        "src/core/video-controller.js",
+        "src/ui/button-injector.js",
+        "src/ui/subtitle-viewer.js",
+        "src/content.js"
+      ],
       "run_at": "document_end"
     }
   ]
