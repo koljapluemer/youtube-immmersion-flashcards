@@ -1,86 +1,35 @@
-import { SubtitleExtractor } from './core/subtitle-extractor.js';
-import { SubtitleViewer } from './ui/subtitle-viewer.js';
-import { ButtonInjector } from './ui/button-injector.js';
-import { ApiKeyManager } from './core/api-key-manager.js';
-import type { TimedSubtitle } from './types/index.js';
+import { PracticeController } from './core/practice-controller.js';
 
-class YouTubeSubtitleApp {
-  private subtitleExtractor: SubtitleExtractor;
-  private subtitleViewer: SubtitleViewer;
-  private buttonInjector: ButtonInjector | null;
+class YouTubePracticeApp {
+  private practiceController: PracticeController;
+  private isInitialized: boolean = false;
 
   constructor() {
-    this.subtitleExtractor = new SubtitleExtractor();
-    this.subtitleViewer = new SubtitleViewer();
-    this.buttonInjector = null;
+    this.practiceController = new PracticeController();
   }
 
   async start(): Promise<void> {
-    console.log('[YouTube Subtitle App] Starting...');
+    console.log('[YouTube Practice App] Starting...');
 
-    // Initialize button injector with click handler
-    this.buttonInjector = new ButtonInjector(async () => {
-      await this.handleButtonClick();
-    });
-
-    this.buttonInjector.start();
-    console.log('[YouTube Subtitle App] Started successfully');
-  }
-
-  async handleButtonClick(): Promise<void> {
     try {
-      // Ensure we have an OpenAI API key
-      const apiKey = await ApiKeyManager.ensureOpenAIKey();
-      if (!apiKey) {
-        console.log('No API key provided, cancelling');
-        return;
-      }
-
-      console.log('API key validated, extracting subtitles...');
-
-      // Extract subtitles
-      const subtitles = await this.subtitleExtractor.extractSubtitles();
-
-      if (!subtitles || subtitles.length === 0) {
-        alert('No subtitles found or extracted');
-        return;
-      }
-
-      console.log(`Extracted ${subtitles.length} subtitle segments`);
-
-      // Show subtitle viewer
-      this.subtitleViewer.show(subtitles);
-
+      await this.practiceController.initialize();
+      this.isInitialized = true;
+      console.log('[YouTube Practice App] Started successfully');
     } catch (error) {
-      console.error('Error in handleButtonClick:', error);
-      alert('Error: ' + error.message);
+      console.error('[YouTube Practice App] Failed to start:', error);
     }
   }
 
-  stop(): void {
-    if (this.buttonInjector) {
-      this.buttonInjector.stop();
-    }
-
-    if (this.subtitleViewer.isActive()) {
-      this.subtitleViewer.close();
-    }
-
-    console.log('[YouTube Subtitle App] Stopped');
-  }
-
-  getStatus(): { isRunning: boolean; subtitleViewerActive: boolean; progress: { current: number; total: number } } {
+  getStatus(): { isInitialized: boolean } {
     return {
-      isRunning: this.buttonInjector !== null,
-      subtitleViewerActive: this.subtitleViewer.isActive(),
-      progress: this.subtitleViewer.getProgress()
+      isInitialized: this.isInitialized
     };
   }
 }
 
 // Initialize and start the app
-const app = new YouTubeSubtitleApp();
+const app = new YouTubePracticeApp();
 app.start();
 
 // Expose app globally for debugging
-window.youtubeSubtitleApp = app;
+(window as any).youtubePracticeApp = app;
