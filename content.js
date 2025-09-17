@@ -71,26 +71,34 @@ async function toggleUntilPoTokenSet() {
 }
 
 async function getSubtitles() {
-  const videoId = new URLSearchParams(window.location.search).get('v');
-  const url = 'https://www.youtube.com/watch?v=' + videoId;
-  const html = await fetch(url).then(resp => resp.text());
-  const regex = /\{"captionTracks":(\[.*?\]),/g;
-  const arr = regex.exec(html);
+  try {
+    console.log('getSubtitles called');
+    console.log('Current poToken:', poToken);
 
-  if (arr == null) {
-    alert('No subtitles found for this video');
-    return;
-  }
+    const videoId = new URLSearchParams(window.location.search).get('v');
+    console.log('Video ID:', videoId);
 
-  const captionTracks = JSON.parse(arr[1]);
-  console.log('Available tracks:', captionTracks.map(t => `${t.languageCode}: ${t.name?.simpleText || 'Unknown'}`));
+    const url = 'https://www.youtube.com/watch?v=' + videoId;
+    const html = await fetch(url).then(resp => resp.text());
+    const regex = /\{"captionTracks":(\[.*?\]),/g;
+    const arr = regex.exec(html);
 
-  if (!poToken) {
-    await toggleUntilPoTokenSet();
-  }
+    if (arr == null) {
+      alert('No subtitles found for this video');
+      return;
+    }
 
-  const subsUrl = captionTracks[0].baseUrl + '&pot=' + poToken + '&c=WEB';
-  console.log('Fetching with POT token:', subsUrl.substring(0, 100) + '...');
+    const captionTracks = JSON.parse(arr[1]);
+    console.log('Available tracks:', captionTracks.map(t => `${t.languageCode}: ${t.name?.simpleText || 'Unknown'}`));
+
+    if (!poToken) {
+      console.log('No POT token, attempting to get one...');
+      await toggleUntilPoTokenSet();
+      console.log('POT token after toggle:', poToken);
+    }
+
+    const subsUrl = captionTracks[0].baseUrl + '&pot=' + poToken + '&c=WEB';
+    console.log('Fetching with POT token:', subsUrl.substring(0, 100) + '...');
 
   const subsResponse = await fetch(subsUrl);
   const xmlText = await subsResponse.text();
@@ -99,10 +107,37 @@ async function getSubtitles() {
     const parser = new DOMParser();
     const xml = parser.parseFromString(xmlText, 'text/xml');
     const textNodes = xml.getElementsByTagName('text');
-    const text = Array.from(textNodes).map(node => node.textContent).join(' ');
-    alert(text.substring(0, 1000));
+
+    console.log('XML response:', xmlText.substring(0, 500));
+    console.log('Number of text nodes:', textNodes.length);
+
+    if (textNodes.length > 0) {
+      console.log('First text node:', textNodes[0]);
+      console.log('First text attributes:', {
+        start: textNodes[0].getAttribute('start'),
+        dur: textNodes[0].getAttribute('dur'),
+        text: textNodes[0].textContent
+      });
+
+      const timedSubtitles = Array.from(textNodes).map(node => ({
+        start: parseFloat(node.getAttribute('start') || 0),
+        duration: parseFloat(node.getAttribute('dur') || 0),
+        text: node.textContent
+      }));
+
+      console.log('Timed subtitles (first 5):', timedSubtitles.slice(0, 5));
+
+      const text = timedSubtitles.map(sub => sub.text).join(' ');
+      alert(`Found ${timedSubtitles.length} subtitle entries with timestamps\n\n${text.substring(0, 500)}`);
+    } else {
+      alert('No text nodes found in XML');
+    }
   } else {
     alert(`Empty response from YouTube API. Status: ${subsResponse.status}`);
+  }
+  } catch (error) {
+    console.error('Error in getSubtitles:', error);
+    alert('Error: ' + error.message);
   }
 }
 
