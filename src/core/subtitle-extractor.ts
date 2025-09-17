@@ -1,9 +1,14 @@
-class SubtitleExtractor {
+import { YouTubeHelpers } from '../utils/youtube-helpers.js';
+import type { TimedSubtitle, POTTokenManager } from '../types/index.js';
+
+export class SubtitleExtractor {
+  private tokenManager: POTTokenManager;
+
   constructor() {
     this.tokenManager = YouTubeHelpers.initializePOTTokenCapture();
   }
 
-  async extractSubtitles() {
+  async extractSubtitles(): Promise<TimedSubtitle[]> {
     try {
       console.log('getSubtitles called');
       console.log('Current poToken:', this.tokenManager.getToken());
@@ -47,7 +52,7 @@ class SubtitleExtractor {
     }
   }
 
-  parseSubtitleXML(xmlText) {
+  parseSubtitleXML(xmlText: string): TimedSubtitle[] {
     console.log('XML response:', xmlText.substring(0, 500));
 
     const parser = new DOMParser();

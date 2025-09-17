@@ -1,7 +1,7 @@
-class ApiKeyManager {
-  static async ensureOpenAIKey() {
+export class ApiKeyManager {
+  static async ensureOpenAIKey(): Promise<string | null> {
     // Try to get existing key from chrome storage
-    const result = await new Promise((resolve) => {
+    const result = await new Promise<{openai_api_key?: string}>((resolve) => {
       chrome.storage.local.get(['openai_api_key'], resolve);
     });
 
@@ -30,24 +30,24 @@ class ApiKeyManager {
     return apiKey;
   }
 
-  static validateKeyFormat(key) {
+  static validateKeyFormat(key: string): boolean {
     return key && key.startsWith('sk-');
   }
 
-  static async storeKey(apiKey) {
+  static async storeKey(apiKey: string): Promise<void> {
     return new Promise((resolve) => {
       chrome.storage.local.set({ 'openai_api_key': apiKey }, resolve);
     });
   }
 
-  static async getStoredKey() {
-    const result = await new Promise((resolve) => {
+  static async getStoredKey(): Promise<string | null> {
+    const result = await new Promise<{openai_api_key?: string}>((resolve) => {
       chrome.storage.local.get(['openai_api_key'], resolve);
     });
     return result.openai_api_key || null;
   }
 
-  static async clearKey() {
+  static async clearKey(): Promise<void> {
     return new Promise((resolve) => {
       chrome.storage.local.remove(['openai_api_key'], resolve);
     });

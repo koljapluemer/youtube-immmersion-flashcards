@@ -1,10 +1,22 @@
-class VideoController {
+const SELECTORS = {
+  VIDEO_ELEMENT: 'video',
+  VIDEO_CONTAINER: '#movie_player'
+};
+
+const TIMING = {
+  VIDEO_BUFFER_TIME: 0.5
+};
+
+export class VideoController {
+  private videoElement: HTMLVideoElement | null;
+  private originalVideoContainer: HTMLElement | null;
+
   constructor() {
     this.videoElement = null;
     this.originalVideoContainer = null;
   }
 
-  initialize() {
+  initialize(): void {
     this.videoElement = document.querySelector(SELECTORS.VIDEO_ELEMENT);
     this.originalVideoContainer = document.querySelector(SELECTORS.VIDEO_CONTAINER);
 
@@ -13,26 +25,26 @@ class VideoController {
     }
   }
 
-  getVideoDimensions() {
+  getVideoDimensions(): { width: number; height: number } {
     return {
       width: this.originalVideoContainer.offsetWidth,
       height: this.originalVideoContainer.offsetHeight
     };
   }
 
-  hideVideo() {
+  hideVideo(): void {
     if (this.originalVideoContainer) {
       this.originalVideoContainer.style.display = 'none';
     }
   }
 
-  showVideo() {
+  showVideo(): void {
     if (this.originalVideoContainer) {
       this.originalVideoContainer.style.display = 'block';
     }
   }
 
-  async playSegment(startTime, duration) {
+  async playSegment(startTime: number, duration: number): Promise<void> {
     return new Promise((resolve) => {
       if (!this.videoElement) {
         resolve();
@@ -45,7 +57,7 @@ class VideoController {
       this.videoElement.currentTime = adjustedStartTime;
       this.videoElement.play();
 
-      const stopHandler = () => {
+      const stopHandler = (): void => {
         if (this.videoElement.currentTime >= endTime) {
           this.videoElement.pause();
           this.videoElement.removeEventListener('timeupdate', stopHandler);
@@ -57,17 +69,17 @@ class VideoController {
     });
   }
 
-  pause() {
+  pause(): void {
     if (this.videoElement) {
       this.videoElement.pause();
     }
   }
 
-  getCurrentTime() {
+  getCurrentTime(): number {
     return this.videoElement ? this.videoElement.currentTime : 0;
   }
 
-  setCurrentTime(time) {
+  setCurrentTime(time: number): void {
     if (this.videoElement) {
       this.videoElement.currentTime = time;
     }

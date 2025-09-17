@@ -1,17 +1,17 @@
-const SELECTORS = {
+export const SELECTORS = {
   VIDEO_TITLE: 'h1.ytd-watch-metadata yt-formatted-string',
   VIDEO_ELEMENT: 'video',
   VIDEO_CONTAINER: '#movie_player',
   SUBTITLES_BUTTON: '.ytp-subtitles-button'
 };
 
-const CSS_CLASSES = {
+export const CSS_CLASSES = {
   CUSTOM_BUTTON: 'custom-alert-button',
   SUBTITLE_UI_CONTAINER: 'subtitle-ui-container',
   SUBTITLE_TEXT: 'subtitle-text'
 };
 
-const STYLES = {
+export const STYLES = {
   BUTTON: `
     background: #ff0000;
     color: white;
@@ -63,7 +63,7 @@ const STYLES = {
   `
 };
 
-const TIMING = {
+export const TIMING = {
   POT_TOKEN_TIMEOUT: 2000,
   POT_TOKEN_CHECK_INTERVAL: 100,
   VIDEO_BUFFER_TIME: 0.5,

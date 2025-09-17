@@ -1,11 +1,21 @@
+import { SubtitleExtractor } from './core/subtitle-extractor.js';
+import { SubtitleViewer } from './ui/subtitle-viewer.js';
+import { ButtonInjector } from './ui/button-injector.js';
+import { ApiKeyManager } from './core/api-key-manager.js';
+import type { TimedSubtitle } from './types/index.js';
+
 class YouTubeSubtitleApp {
+  private subtitleExtractor: SubtitleExtractor;
+  private subtitleViewer: SubtitleViewer;
+  private buttonInjector: ButtonInjector | null;
+
   constructor() {
     this.subtitleExtractor = new SubtitleExtractor();
     this.subtitleViewer = new SubtitleViewer();
     this.buttonInjector = null;
   }
 
-  async start() {
+  async start(): Promise<void> {
     console.log('[YouTube Subtitle App] Starting...');
 
     // Initialize button injector with click handler
@@ -17,7 +27,7 @@ class YouTubeSubtitleApp {
     console.log('[YouTube Subtitle App] Started successfully');
   }
 
-  async handleButtonClick() {
+  async handleButtonClick(): Promise<void> {
     try {
       // Ensure we have an OpenAI API key
       const apiKey = await ApiKeyManager.ensureOpenAIKey();
@@ -47,7 +57,7 @@ class YouTubeSubtitleApp {
     }
   }
 
-  stop() {
+  stop(): void {
     if (this.buttonInjector) {
       this.buttonInjector.stop();
     }
@@ -59,7 +69,7 @@ class YouTubeSubtitleApp {
     console.log('[YouTube Subtitle App] Stopped');
   }
 
-  getStatus() {
+  getStatus(): { isRunning: boolean; subtitleViewerActive: boolean; progress: { current: number; total: number } } {
     return {
       isRunning: this.buttonInjector !== null,
       subtitleViewerActive: this.subtitleViewer.isActive(),

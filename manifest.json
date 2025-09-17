@@ -1,10 +1,10 @@
 {
   "manifest_version": 3,
-  "name": "YouTube Video Button",
+  "name": "YouTube Immersion Flashcards",
   "version": "1.0",
-  "description": "Adds a button next to YouTube video titles that shows subtitles when clicked",
+  "description": "Learn vocabulary from YouTube videos using spaced repetition flashcards",
   "permissions": ["storage"],
-  "host_permissions": ["*://*.youtube.com/*"],
+  "host_permissions": ["*://*.youtube.com/*", "*://api.openai.com/*"],
   "web_accessible_resources": [
     {
       "resources": ["injected.js"],
@@ -14,16 +14,7 @@
   "content_scripts": [
     {
       "matches": ["*://*.youtube.com/*"],
-      "js": [
-        "src/config/constants.js",
-        "src/core/api-key-manager.js",
-        "src/utils/youtube-helpers.js",
-        "src/core/subtitle-extractor.js",
-        "src/core/video-controller.js",
-        "src/ui/button-injector.js",
-        "src/ui/subtitle-viewer.js",
-        "src/content.js"
-      ],
+      "js": ["src/content.ts"],
       "run_at": "document_end"
     }
   ]

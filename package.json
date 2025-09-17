@@ -1,0 +1,40 @@
+{
+  "name": "youtube-immmersion-flashcards",
+  "version": "1.0.0",
+  "description": "",
+  "main": "fsrs.min.js",
+  "directories": {
+    "doc": "docs"
+  },
+  "scripts": {
+    "dev": "vite dev",
+    "build": "vite build",
+    "lint": "eslint src/**/*.ts",
+    "lint:fix": "eslint src/**/*.ts --fix"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/koljapluemer/youtube-immmersion-flashcards.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "module",
+  "bugs": {
+    "url": "https://github.com/koljapluemer/youtube-immmersion-flashcards/issues"
+  },
+  "homepage": "https://github.com/koljapluemer/youtube-immmersion-flashcards#readme",
+  "dependencies": {
+    "ts-fsrs": "^5.2.3"
+  },
+  "devDependencies": {
+    "@types/chrome": "^0.1.12",
+    "@typescript-eslint/eslint-plugin": "^8.44.0",
+    "@typescript-eslint/parser": "^8.44.0",
+    "eslint": "^9.35.0",
+    "typescript": "^5.9.2",
+    "vite": "^7.1.5",
+    "vite-plugin-web-extension": "^4.4.5",
+    "webextension-polyfill": "^0.12.0"
+  }
+}
