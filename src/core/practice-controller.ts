@@ -4,6 +4,7 @@ import { VideoController } from './video-controller.js';
 import { VocabExtractor } from './vocab-extractor.js';
 import { FSRSCardManager, type VocabCard } from './fsrs-card-manager.js';
 import { ApiKeyManager } from './api-key-manager.js';
+import type { VocabItem } from '../types/index.js';
 
 export class PracticeController {
   private stateMachine: PracticeStateMachine | null = null;
@@ -13,9 +14,11 @@ export class PracticeController {
   private cardManager: FSRSCardManager;
   private originalVideoContainer: HTMLElement | null = null;
   private practiceContainer: HTMLElement | null = null;
-  private currentFlashcards: VocabCard[] = [];
-  private currentFlashcardIndex: number = 0;
+  private currentVocabulary: VocabItem[] = [];
+  private currentCard: VocabCard | null = null;
+  private currentCardStatus: 'NEW' | 'DUE' | null = null;
   private isFlashcardRevealed: boolean = false;
+  private lastPickedVocabId: string | null = null;
 
   constructor() {
     this.subtitleExtractor = new SubtitleExtractor();
@@ -167,15 +170,16 @@ export class PracticeController {
   private async renderFlashcardMode(state: PracticeState): Promise<void> {
     if (!state.currentSubtitle) return;
 
-    // Reset controller's flashcard state when starting new subtitle
-    if (!state.flashcards || state.flashcards.length === 0) {
-      this.currentFlashcards = [];
-      this.currentFlashcardIndex = 0;
-      this.isFlashcardRevealed = false;
-    }
+    // Check if we moved to a new subtitle - reset vocabulary if so
+    const currentSubtitleText = state.currentSubtitle.text;
+    const isNewSubtitle = this.currentVocabulary.length === 0 ||
+                         !this.currentVocabulary.some(v => currentSubtitleText.includes(v.original));
 
-    // Load flashcards if not already loaded
-    if (!state.flashcards || state.flashcards.length === 0) {
+    // Extract vocabulary if not already done or if this is a new subtitle
+    if (isNewSubtitle) {
+      // Reset state for new subtitle
+      this.currentVocabulary = [];
+      this.lastPickedVocabId = null;
       try {
         const vocabulary = await this.vocabExtractor.extractVocabulary(state.currentSubtitle.text, 'auto');
 
@@ -185,30 +189,36 @@ export class PracticeController {
           return;
         }
 
-        // Create flashcards
-        const flashcards = [];
-        for (const vocab of vocabulary) {
-          const existingCards = await this.cardManager.getStoredCards();
-          const existingCard = existingCards.find(c => c.vocab.original === vocab.original);
-
-          if (existingCard) {
-            flashcards.push(existingCard);
-          } else {
-            const newCard = await this.cardManager.createCard(vocab);
-            flashcards.push(newCard);
-          }
-        }
-
-        this.currentFlashcards = flashcards;
-        this.currentFlashcardIndex = 0;
-        this.isFlashcardRevealed = false;
-        this.stateMachine!.setFlashcards(flashcards);
-
+        this.currentVocabulary = vocabulary;
       } catch (error) {
-        console.error('Error creating flashcards:', error);
+        console.error('Error extracting vocabulary:', error);
         this.stateMachine!.moveToAutoplay();
         return;
       }
+    }
+
+    // Get next available card
+    const nextCardInfo = await this.cardManager.getNextAvailableCard(this.currentVocabulary, this.lastPickedVocabId);
+
+    if (!nextCardInfo) {
+      // No more cards to show, go to autoplay
+      this.stateMachine!.moveToAutoplay();
+      return;
+    }
+
+    // Set current card info
+    this.currentCardStatus = nextCardInfo.status;
+    this.lastPickedVocabId = nextCardInfo.vocab.original;
+
+    if (nextCardInfo.status === 'NEW') {
+      // Create new card for NEW vocabulary
+      this.currentCard = await this.cardManager.createAndMarkNewCard(nextCardInfo.vocab);
+      this.isFlashcardRevealed = true; // NEW cards show front+back immediately
+    } else if (nextCardInfo.status === 'DUE' && nextCardInfo.existingCard) {
+      // Use existing card for DUE vocabulary
+      this.currentCard = nextCardInfo.existingCard;
+      await this.cardManager.markCardAsPicked(nextCardInfo.vocab);
+      this.isFlashcardRevealed = false; // DUE cards start with reveal flow
     }
 
     // Replace video with flashcard UI
@@ -228,48 +238,82 @@ export class PracticeController {
       document.body.appendChild(this.practiceContainer);
     }
 
-    const currentCard = this.currentFlashcards[this.currentFlashcardIndex];
-    if (!currentCard) return;
+    if (!this.currentCard) return;
+
+    // Build content based on card status and reveal state
+    const content = this.buildFlashcardContent();
+    const buttons = this.buildFlashcardButtons();
 
     this.practiceContainer.innerHTML = `
       <div style="${this.getFlashcardContainerStyle()}">
         <div style="${this.getFlashcardStyle()}">
           <div style="${this.getFlashcardContentStyle()}">
-            ${!this.isFlashcardRevealed
-              ? `<div style="${this.getForeignTextStyle()}">${currentCard.vocab.original}</div>`
-              : `
-                <div style="${this.getForeignTextStyle()}">${currentCard.vocab.original}</div>
-                <hr style="${this.getDividerStyle()}">
-                <div style="${this.getTranslationTextStyle()}">${currentCard.vocab.translation}</div>
-              `
-            }
+            ${content}
           </div>
-
           <div style="${this.getFlashcardButtonsStyle()}">
-            ${!this.isFlashcardRevealed
-              ? `<button class="flashcard-reveal-btn" style="${this.getRevealButtonStyle()}">Reveal</button>`
-              : `
-                <button class="flashcard-rating-btn" data-rating="1" style="${this.getRatingButtonStyle('#ef4444')}">Again</button>
-                <button class="flashcard-rating-btn" data-rating="2" style="${this.getRatingButtonStyle('#f97316')}">Hard</button>
-                <button class="flashcard-rating-btn" data-rating="3" style="${this.getRatingButtonStyle('#22c55e')}">Good</button>
-                <button class="flashcard-rating-btn" data-rating="4" style="${this.getRatingButtonStyle('#3b82f6')}">Easy</button>
-              `
-            }
+            ${buttons}
           </div>
-        </div>
-
-        <div style="${this.getProgressStyle()}">
-          Card ${this.currentFlashcardIndex + 1} of ${this.currentFlashcards.length}
         </div>
       </div>
     `;
 
     // Add event listeners
+    this.addFlashcardEventListeners();
+  }
+
+  private buildFlashcardContent(): string {
+    if (!this.currentCard) return '';
+
+    if (!this.isFlashcardRevealed) {
+      // Show only front (for DUE cards)
+      return `<div style="${this.getForeignTextStyle()}">${this.currentCard.vocab.original}</div>`;
+    } else {
+      // Show front+back (for NEW cards immediately, DUE cards after reveal)
+      return `
+        <div style="${this.getForeignTextStyle()}">${this.currentCard.vocab.original}</div>
+        <hr style="${this.getDividerStyle()}">
+        <div style="${this.getTranslationTextStyle()}">${this.currentCard.vocab.translation}</div>
+      `;
+    }
+  }
+
+  private buildFlashcardButtons(): string {
+    if (this.currentCardStatus === 'NEW') {
+      // NEW cards: only "I will remember" button
+      return `<button class="remember-btn" style="${this.getRememberButtonStyle()}">I will remember</button>`;
+    } else if (this.currentCardStatus === 'DUE') {
+      if (!this.isFlashcardRevealed) {
+        // DUE cards before reveal: "Reveal" button
+        return `<button class="flashcard-reveal-btn" style="${this.getRevealButtonStyle()}">Reveal</button>`;
+      } else {
+        // DUE cards after reveal: ALL FOUR rating buttons
+        return `
+          <button class="flashcard-rating-btn" data-rating="1" style="${this.getRatingButtonStyle('#ef4444')}">Again</button>
+          <button class="flashcard-rating-btn" data-rating="2" style="${this.getRatingButtonStyle('#f97316')}">Hard</button>
+          <button class="flashcard-rating-btn" data-rating="3" style="${this.getRatingButtonStyle('#22c55e')}">Good</button>
+          <button class="flashcard-rating-btn" data-rating="4" style="${this.getRatingButtonStyle('#3b82f6')}">Easy</button>
+        `;
+      }
+    }
+    return '';
+  }
+
+  private addFlashcardEventListeners(): void {
+    if (!this.practiceContainer) return;
+
+    // Remember button for NEW cards
+    const rememberBtn = this.practiceContainer.querySelector('.remember-btn');
+    if (rememberBtn) {
+      rememberBtn.addEventListener('click', () => this.handleRememberCard());
+    }
+
+    // Reveal button for DUE cards
     const revealBtn = this.practiceContainer.querySelector('.flashcard-reveal-btn');
     if (revealBtn) {
       revealBtn.addEventListener('click', () => this.handleRevealFlashcard());
     }
 
+    // Rating buttons for DUE cards after reveal
     const ratingBtns = this.practiceContainer.querySelectorAll('.flashcard-rating-btn');
     ratingBtns.forEach(btn => {
       btn.addEventListener('click', (e) => {
@@ -281,27 +325,35 @@ export class PracticeController {
 
   private handleRevealFlashcard(): void {
     this.isFlashcardRevealed = true;
-    this.renderCurrentMode();
+    // Just re-render the current flashcard, don't get next card
+    this.replaceVideoWithFlashcard();
+  }
+
+  private async handleRememberCard(): Promise<void> {
+    // For NEW cards, just move to next card (card already created and persisted)
+    await this.moveToNextCard();
   }
 
   private async handleFlashcardRating(rating: number): Promise<void> {
-    const currentCard = this.currentFlashcards[this.currentFlashcardIndex];
+    if (!this.currentCard) return;
 
     try {
-      await this.cardManager.reviewCard(currentCard.id, rating);
+      await this.cardManager.reviewCard(this.currentCard.id, rating);
     } catch (error) {
       console.error('Error rating card:', error);
     }
 
-    // Move to next card
-    this.currentFlashcardIndex++;
+    await this.moveToNextCard();
+  }
+
+  private async moveToNextCard(): Promise<void> {
+    // Reset card state
+    this.currentCard = null;
+    this.currentCardStatus = null;
     this.isFlashcardRevealed = false;
 
-    if (this.currentFlashcardIndex >= this.currentFlashcards.length) {
-      this.stateMachine!.moveToAutoplay();
-    } else {
-      this.renderCurrentMode();
-    }
+    // Try to render next card, or move to autoplay if none left
+    await this.renderFlashcardMode(this.stateMachine!.getCurrentState());
   }
 
   private renderAutoplayMode(state: PracticeState): void {
@@ -519,6 +571,21 @@ export class PracticeController {
       cursor: pointer;
       font-family: "Roboto", "Arial", sans-serif;
       transition: opacity 0.1s ease;
+    `;
+  }
+
+  private getRememberButtonStyle(): string {
+    return `
+      background: #065fd4;
+      color: white;
+      border: none;
+      padding: 10px 20px;
+      border-radius: 18px;
+      font-size: 14px;
+      font-weight: 500;
+      cursor: pointer;
+      font-family: "Roboto", "Arial", sans-serif;
+      transition: background-color 0.1s ease;
     `;
   }
 

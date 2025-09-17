@@ -7,7 +7,7 @@ export interface VocabCard {
   vocab: VocabItem;
   fsrsCard: Card;
   created: string; // ISO date
-  lastReviewed?: string; // ISO date
+  lastPicked?: string; // Track when last picked to prevent consecutive duplicates
 }
 
 export class FSRSCardManager {
@@ -50,13 +50,14 @@ export class FSRSCardManager {
 
   async createCard(vocab: VocabItem): Promise<VocabCard> {
     const id = `vocab_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-    const fsrsCard = createEmptyCard();
+    const fsrsCard = createEmptyCard(new Date()); // Use the CORRECT function for new cards
 
     const vocabCard: VocabCard = {
       id,
       vocab,
       fsrsCard,
-      created: new Date().toISOString()
+      created: new Date().toISOString(),
+      lastPicked: undefined
     };
 
     const existingCards = await this.getStoredCards();
@@ -82,8 +83,14 @@ export class FSRSCardManager {
     const updatedCard: VocabCard = {
       ...card,
       fsrsCard: selectedResult.card,
-      lastReviewed: reviewDate.toISOString()
+      lastReviewed: reviewDate.toISOString(),
+      lastPicked: reviewDate.toISOString()
     };
+
+    // Special handling for "Wrong" (Again) button - set due immediately
+    if (grade === Rating.Again) {
+      updatedCard.fsrsCard.due = new Date();
+    }
 
     cards[cardIndex] = updatedCard;
     await this.saveCards(cards);
@@ -91,20 +98,63 @@ export class FSRSCardManager {
     return { card: updatedCard, log: selectedResult.log };
   }
 
-  async getDueCards(): Promise<VocabCard[]> {
+  async getCardStatus(vocab: VocabItem): Promise<'NEW' | 'DUE' | 'NOT_DUE'> {
     const cards = await this.getStoredCards();
-    const now = new Date();
+    const existingCard = cards.find(card => card.vocab.original === vocab.original);
 
-    return cards.filter(card => card.fsrsCard.due <= now);
+    if (!existingCard) {
+      return 'NEW';
+    }
+
+    const currentDate = new Date();
+    return currentDate >= existingCard.fsrsCard.due ? 'DUE' : 'NOT_DUE';
   }
 
-  async getNewCards(): Promise<VocabCard[]> {
+  async findExistingCard(vocab: VocabItem): Promise<VocabCard | null> {
     const cards = await this.getStoredCards();
-    return cards.filter(card => card.fsrsCard.state === 0); // State.New
+    return cards.find(card => card.vocab.original === vocab.original) || null;
   }
 
-  isCardDue(card: VocabCard, currentDate: Date = new Date()): boolean {
-    return card.fsrsCard.due <= currentDate;
+  async getNextAvailableCard(vocabulary: VocabItem[], lastPickedId?: string): Promise<{vocab: VocabItem, status: 'NEW' | 'DUE', existingCard?: VocabCard} | null> {
+    for (const vocab of vocabulary) {
+      // Skip if this was the last picked vocab
+      if (lastPickedId && vocab.original === lastPickedId) {
+        continue;
+      }
+
+      const status = await this.getCardStatus(vocab);
+      if (status === 'NEW' || status === 'DUE') {
+        const existingCard = status === 'DUE' ? await this.findExistingCard(vocab) : undefined;
+        return { vocab, status, existingCard };
+      }
+    }
+
+    return null;
+  }
+
+  async markCardAsPicked(vocab: VocabItem): Promise<void> {
+    const cards = await this.getStoredCards();
+    const cardIndex = cards.findIndex(card => card.vocab.original === vocab.original);
+
+    if (cardIndex !== -1) {
+      cards[cardIndex].lastPicked = new Date().toISOString();
+      await this.saveCards(cards);
+    }
+  }
+
+  async createAndMarkNewCard(vocab: VocabItem): Promise<VocabCard> {
+    const newCard = await this.createCard(vocab);
+    newCard.lastPicked = new Date().toISOString();
+
+    // Update the card in storage with lastPicked
+    const cards = await this.getStoredCards();
+    const cardIndex = cards.findIndex(card => card.id === newCard.id);
+    if (cardIndex !== -1) {
+      cards[cardIndex] = newCard;
+      await this.saveCards(cards);
+    }
+
+    return newCard;
   }
 
   private serializeCard(card: Card): Record<string, unknown> {
