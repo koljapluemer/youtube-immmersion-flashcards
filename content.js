@@ -127,8 +127,7 @@ async function getSubtitles() {
 
       console.log('Timed subtitles (first 5):', timedSubtitles.slice(0, 5));
 
-      const text = timedSubtitles.map(sub => sub.text).join(' ');
-      alert(`Found ${timedSubtitles.length} subtitle entries with timestamps\n\n${text.substring(0, 500)}`);
+      createSubtitleUI(timedSubtitles);
     } else {
       alert('No text nodes found in XML');
     }
@@ -138,6 +137,155 @@ async function getSubtitles() {
   } catch (error) {
     console.error('Error in getSubtitles:', error);
     alert('Error: ' + error.message);
+  }
+}
+
+let currentSubtitleIndex = 0;
+let subtitlesArray = [];
+let videoElement = null;
+let originalVideoContainer = null;
+
+function createSubtitleUI(timedSubtitles) {
+  subtitlesArray = timedSubtitles;
+  currentSubtitleIndex = 0;
+
+  // Find video element and its container
+  videoElement = document.querySelector('video');
+  const videoContainer = document.querySelector('#movie_player');
+
+  if (!videoElement || !videoContainer) {
+    alert('Could not find video player');
+    return;
+  }
+
+  // Store original container
+  originalVideoContainer = videoContainer;
+
+  // Create UI container with same dimensions
+  const uiContainer = document.createElement('div');
+  uiContainer.id = 'subtitle-ui-container';
+  uiContainer.style.cssText = `
+    width: ${videoContainer.offsetWidth}px;
+    height: ${videoContainer.offsetHeight}px;
+    background: #000;
+    color: white;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    padding: 40px;
+    box-sizing: border-box;
+    font-family: Arial, sans-serif;
+  `;
+
+  // Create subtitle text display
+  const subtitleText = document.createElement('div');
+  subtitleText.id = 'subtitle-text';
+  subtitleText.style.cssText = `
+    font-size: 24px;
+    line-height: 1.5;
+    text-align: center;
+    margin-bottom: 40px;
+    max-width: 80%;
+  `;
+
+  // Create next button
+  const nextButton = document.createElement('button');
+  nextButton.textContent = 'Next';
+  nextButton.style.cssText = `
+    font-size: 18px;
+    padding: 12px 24px;
+    background: #ff0000;
+    color: white;
+    border: none;
+    border-radius: 6px;
+    cursor: pointer;
+    margin: 20px;
+  `;
+
+  // Create close button
+  const closeButton = document.createElement('button');
+  closeButton.textContent = 'Close';
+  closeButton.style.cssText = `
+    font-size: 18px;
+    padding: 12px 24px;
+    background: #666;
+    color: white;
+    border: none;
+    border-radius: 6px;
+    cursor: pointer;
+    margin: 20px;
+  `;
+
+  nextButton.addEventListener('click', handleNext);
+  closeButton.addEventListener('click', closeSubtitleUI);
+
+  uiContainer.appendChild(subtitleText);
+  uiContainer.appendChild(nextButton);
+  uiContainer.appendChild(closeButton);
+
+  // Replace video container
+  videoContainer.style.display = 'none';
+  videoContainer.parentNode.insertBefore(uiContainer, videoContainer.nextSibling);
+
+  // Show first subtitle
+  updateSubtitleDisplay();
+}
+
+function updateSubtitleDisplay() {
+  const subtitleText = document.getElementById('subtitle-text');
+  if (currentSubtitleIndex < subtitlesArray.length) {
+    const current = subtitlesArray[currentSubtitleIndex];
+    subtitleText.textContent = current.text;
+    console.log(`Showing subtitle ${currentSubtitleIndex + 1}/${subtitlesArray.length}:`, current);
+  }
+}
+
+function handleNext() {
+  if (currentSubtitleIndex < subtitlesArray.length) {
+    const current = subtitlesArray[currentSubtitleIndex];
+
+    // Show video and play segment
+    const uiContainer = document.getElementById('subtitle-ui-container');
+    uiContainer.style.display = 'none';
+    originalVideoContainer.style.display = 'block';
+
+    // Set video time and play
+    const startTime = Math.max(0, current.start - 0.5);
+    const endTime = current.start + current.duration + 0.5;
+
+    videoElement.currentTime = startTime;
+    videoElement.play();
+
+    // Stop at end time
+    const stopHandler = () => {
+      if (videoElement.currentTime >= endTime) {
+        videoElement.pause();
+        videoElement.removeEventListener('timeupdate', stopHandler);
+
+        // Move to next subtitle
+        currentSubtitleIndex++;
+
+        // Show UI again
+        setTimeout(() => {
+          originalVideoContainer.style.display = 'none';
+          uiContainer.style.display = 'flex';
+          updateSubtitleDisplay();
+        }, 500);
+      }
+    };
+
+    videoElement.addEventListener('timeupdate', stopHandler);
+  }
+}
+
+function closeSubtitleUI() {
+  const uiContainer = document.getElementById('subtitle-ui-container');
+  if (uiContainer) {
+    uiContainer.remove();
+  }
+  if (originalVideoContainer) {
+    originalVideoContainer.style.display = 'block';
   }
 }
 
