@@ -20,6 +20,7 @@ export class PracticeController {
   private isFlashcardRevealed: boolean = false;
   private lastPickedVocabId: string | null = null;
   private practiceEnded: boolean = false;
+  private preservedEvaluationText: string = '';
 
   constructor() {
     this.subtitleExtractor = new SubtitleExtractor();
@@ -383,6 +384,11 @@ export class PracticeController {
     this.videoController.setCurrentTime(state.videoTimestamp);
     this.videoController.playSegment(state.currentSubtitle.start, state.currentSubtitle.duration)
       .then(() => {
+        // Check if we were rewatching
+        if (state.isRewatching) {
+          // Clear rewatch flag and return to evaluation
+          state.isRewatching = false;
+        }
         this.stateMachine!.moveToEvaluation();
       });
   }
@@ -408,14 +414,29 @@ export class PracticeController {
             style="${this.getEvaluationTextareaStyle()}"
             placeholder="Enter your understanding of the subtitle segment..."
           ></textarea>
-          <button class="save-next-btn" style="${this.getSaveNextButtonStyle()}">Save and Next</button>
+          <div style="${this.getEvaluationButtonsStyle()}">
+            <button class="rewatch-segment-btn" style="${this.getRewatchSegmentButtonStyle()}">Rewatch Segment</button>
+            <button class="save-next-btn" style="${this.getSaveNextButtonStyle()}">Save and Next</button>
+          </div>
         </div>
       </div>
     `;
 
+    // Restore preserved evaluation text if available
+    const textarea = this.practiceContainer.querySelector('.evaluation-input') as HTMLTextAreaElement;
+    if (textarea && this.preservedEvaluationText) {
+      textarea.value = this.preservedEvaluationText;
+      this.preservedEvaluationText = ''; // Clear after restoring
+    }
+
     const saveBtn = this.practiceContainer.querySelector('.save-next-btn');
     if (saveBtn) {
       saveBtn.addEventListener('click', () => this.handleSaveEvaluation());
+    }
+
+    const rewatchBtn = this.practiceContainer.querySelector('.rewatch-segment-btn');
+    if (rewatchBtn) {
+      rewatchBtn.addEventListener('click', () => this.handleRewatchSegment());
     }
 
     // End practice button for fullscreen mode
@@ -432,6 +453,17 @@ export class PracticeController {
     const evaluation = textarea?.value || '';
 
     await this.stateMachine!.saveEvaluationAndNext(evaluation);
+  }
+
+  private handleRewatchSegment(): void {
+    if (this.practiceEnded) return; // Prevent action after practice ended
+
+    // Save current evaluation text before rewatching
+    const textarea = this.practiceContainer?.querySelector('.evaluation-input') as HTMLTextAreaElement;
+    this.preservedEvaluationText = textarea?.value || '';
+
+    // Trigger rewatch in state machine
+    this.stateMachine!.rewatchCurrentSegment();
   }
 
   private hideOriginalVideo(): void {
@@ -716,7 +748,31 @@ export class PracticeController {
       cursor: pointer;
       font-family: "Roboto", "Arial", sans-serif;
       transition: background-color 0.1s ease;
+      flex: 1;
+    `;
+  }
+
+  private getEvaluationButtonsStyle(): string {
+    return `
+      display: flex;
+      gap: 12px;
       width: 100%;
+    `;
+  }
+
+  private getRewatchSegmentButtonStyle(): string {
+    return `
+      background: #606060;
+      color: white;
+      border: none;
+      padding: 10px 16px;
+      border-radius: 18px;
+      font-size: 14px;
+      font-weight: 500;
+      cursor: pointer;
+      font-family: "Roboto", "Arial", sans-serif;
+      transition: background-color 0.1s ease;
+      flex: 1;
     `;
   }
 

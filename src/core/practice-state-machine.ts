@@ -17,6 +17,7 @@ export interface PracticeState {
   currentSubtitle?: TimedSubtitle;
   flashcards?: VocabCard[];
   currentFlashcardIndex?: number;
+  isRewatching?: boolean;
 }
 
 export class PracticeStateMachine {
@@ -104,6 +105,12 @@ export class PracticeStateMachine {
 
   moveToEvaluation(): void {
     this.state.mode = PracticeMode.EVALUATION;
+    this.onStateChange(this.state);
+  }
+
+  rewatchCurrentSegment(): void {
+    this.state.isRewatching = true;
+    this.state.mode = PracticeMode.AUTOPLAY;
     this.onStateChange(this.state);
   }
 
