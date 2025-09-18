@@ -1,5 +1,7 @@
 # YouTube Immersion Flashcards
 
+https://github.com/user-attachments/assets/cef7e005-9b76-489e-8803-e9ccf634097a
+
 Practice the words needed to understand a segment of a video.
 Useful for immersion learning as a beginner language learner.
 
