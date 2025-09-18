@@ -27,7 +27,6 @@ A Chrome extension that creates vocabulary flashcards from YouTube subtitles usi
    - Enable "Developer mode" (top right toggle)
    - Click "Load unpacked"
    - Select the `dist` folder from this project
-4. **Configure**: Set your OpenAI API key in extension options
 
 ### Prerequisites
 
@@ -36,24 +35,13 @@ A Chrome extension that creates vocabulary flashcards from YouTube subtitles usi
 
 ## Usage
 
-1. **Setup**: Add your OpenAI API key in extension settings
-2. **Watch**: Go to any YouTube video with subtitles
+2. **Choose**: Go to any YouTube video with subtitles
 3. **Start Practice**: Click "Start Practice" button below the video
+   - Add your OpenAI API key when asked
 4. **Learn**: Practice vocabulary flashcards with FSRS spaced repetition
+4. **Watch**: Watch the video segment that you just practiced for
 5. **Evaluate**: Rate your understanding after each segment
 6. **Continue**: Move to next subtitle segment
-
-### Practice Modes
-
-- **NEW cards**: See word + translation immediately, click "I will remember"
-- **DUE cards**: See word first, click "Show Answer", then rate difficulty (1-4)
-- **Loading**: "Save and Next" shows loading state during AI processing
-
-### Storage
-
-- Vocabulary cached locally to avoid repeated API calls
-- FSRS learning data persists between sessions
-- No data sent to external servers (except OpenAI for vocabulary extraction)
 
 ## Development
 
