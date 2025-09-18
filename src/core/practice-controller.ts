@@ -245,6 +245,7 @@ export class PracticeController {
     const buttons = this.buildFlashcardButtons();
 
     this.practiceContainer.innerHTML = `
+      <button class="fullscreen-end-practice-btn" style="${this.getFullscreenEndPracticeButtonStyle()}">End Practice</button>
       <div style="${this.getFlashcardContainerStyle()}">
         <div style="${this.getFlashcardStyle()}">
           <div style="${this.getFlashcardContentStyle()}">
@@ -321,6 +322,12 @@ export class PracticeController {
         this.handleFlashcardRating(rating);
       });
     });
+
+    // End practice button for fullscreen mode
+    const endPracticeBtn = this.practiceContainer.querySelector('.fullscreen-end-practice-btn');
+    if (endPracticeBtn) {
+      endPracticeBtn.addEventListener('click', () => this.handleEndPractice());
+    }
   }
 
   private handleRevealFlashcard(): void {
@@ -382,6 +389,7 @@ export class PracticeController {
     }
 
     this.practiceContainer.innerHTML = `
+      <button class="fullscreen-end-practice-btn" style="${this.getFullscreenEndPracticeButtonStyle()}">End Practice</button>
       <div style="${this.getEvaluationContainerStyle()}">
         <div style="${this.getEvaluationFormStyle()}">
           <h3 style="${this.getEvaluationTitleStyle()}">What did you understand?</h3>
@@ -398,6 +406,12 @@ export class PracticeController {
     const saveBtn = this.practiceContainer.querySelector('.save-next-btn');
     if (saveBtn) {
       saveBtn.addEventListener('click', () => this.handleSaveEvaluation());
+    }
+
+    // End practice button for fullscreen mode
+    const endPracticeBtn = this.practiceContainer.querySelector('.fullscreen-end-practice-btn');
+    if (endPracticeBtn) {
+      endPracticeBtn.addEventListener('click', () => this.handleEndPractice());
     }
   }
 
@@ -658,6 +672,25 @@ export class PracticeController {
       font-family: "Roboto", "Arial", sans-serif;
       transition: background-color 0.1s ease;
       width: 100%;
+    `;
+  }
+
+  private getFullscreenEndPracticeButtonStyle(): string {
+    return `
+      position: absolute;
+      top: 20px;
+      right: 20px;
+      background: #f1f1f1;
+      color: #030303;
+      border: 1px solid #d3d3d3;
+      padding: 10px 16px;
+      border-radius: 18px;
+      font-size: 14px;
+      font-weight: 500;
+      cursor: pointer;
+      font-family: "Roboto", "Arial", sans-serif;
+      transition: background-color 0.1s ease;
+      z-index: 1000;
     `;
   }
 }
