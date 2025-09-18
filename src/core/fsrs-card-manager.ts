@@ -113,20 +113,29 @@ export class FSRSCardManager {
   }
 
   async getNextAvailableCard(vocabulary: VocabItem[], lastPickedId?: string): Promise<{vocab: VocabItem, status: 'NEW' | 'DUE', existingCard?: VocabCard} | null> {
-    for (const vocab of vocabulary) {
-      // Skip if this was the last picked vocab
-      if (lastPickedId && vocab.original === lastPickedId) {
-        continue;
-      }
+    // Step 1: Filter out last picked card (no-repeat constraint)
+    const eligibleVocab = vocabulary.filter(vocab =>
+      !lastPickedId || vocab.original !== lastPickedId
+    );
 
+    // Step 2: Collect all available cards (NEW or DUE)
+    const availableCards: {vocab: VocabItem, status: 'NEW' | 'DUE', existingCard?: VocabCard}[] = [];
+
+    for (const vocab of eligibleVocab) {
       const status = await this.getCardStatus(vocab);
       if (status === 'NEW' || status === 'DUE') {
         const existingCard = status === 'DUE' ? await this.findExistingCard(vocab) : undefined;
-        return { vocab, status, existingCard };
+        availableCards.push({ vocab, status, existingCard });
       }
     }
 
-    return null;
+    // Step 3: Random selection from available cards
+    if (availableCards.length === 0) {
+      return null;
+    }
+
+    const shuffledCards = this.shuffleArray(availableCards);
+    return shuffledCards[0];
   }
 
   async markCardAsPicked(vocab: VocabItem): Promise<void> {
@@ -175,6 +184,17 @@ export class FSRSCardManager {
       last_review: serializedData.last_review ? new Date(serializedData.last_review as string) : undefined
     } as Card;
   }
+
+  // Fisher-Yates shuffle for unbiased randomization
+  private shuffleArray<T>(array: T[]): T[] {
+    const shuffled = [...array]; // Don't mutate original array
+    for (let i = shuffled.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+    }
+    return shuffled;
+  }
+
 
   // Convenience methods for rating
   static get Rating(): { Again: number; Hard: number; Good: number; Easy: number } {
