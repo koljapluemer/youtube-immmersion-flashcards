@@ -1,5 +1,4 @@
 import type { TimedSubtitle } from '../types/index.js';
-import type { VocabCard } from './fsrs-card-manager.js';
 import browser from 'webextension-polyfill';
 
 export enum PracticeMode {
@@ -15,8 +14,6 @@ export interface PracticeState {
   totalSubtitles: number;
   videoTimestamp: number;
   currentSubtitle?: TimedSubtitle;
-  flashcards?: VocabCard[];
-  currentFlashcardIndex?: number;
   isRewatching?: boolean;
 }
 
@@ -71,32 +68,12 @@ export class PracticeStateMachine {
       currentSubtitleIndex: subtitleIndex,
       totalSubtitles: this.subtitles.length,
       videoTimestamp,
-      currentSubtitle: this.subtitles[subtitleIndex],
-      flashcards: [],
-      currentFlashcardIndex: 0
+      currentSubtitle: this.subtitles[subtitleIndex]
     };
 
     this.onStateChange(this.state);
   }
 
-  setFlashcards(flashcards: VocabCard[]): void {
-    if (this.state.mode === PracticeMode.FLASHCARD_PRACTICE) {
-      this.state.flashcards = flashcards;
-      this.state.currentFlashcardIndex = 0;
-      this.onStateChange(this.state);
-    }
-  }
-
-  nextFlashcard(): void {
-    if (this.state.mode === PracticeMode.FLASHCARD_PRACTICE && this.state.flashcards) {
-      if (this.state.currentFlashcardIndex! < this.state.flashcards.length - 1) {
-        this.state.currentFlashcardIndex!++;
-        this.onStateChange(this.state);
-      } else {
-        this.moveToAutoplay();
-      }
-    }
-  }
 
   moveToAutoplay(): void {
     this.state.mode = PracticeMode.AUTOPLAY;
@@ -128,7 +105,7 @@ export class PracticeStateMachine {
       };
 
       const result = await browser.storage.local.get(['practice_evaluations']);
-      const existingEvaluations = result.practice_evaluations || [];
+      const existingEvaluations = Array.isArray(result.practice_evaluations) ? result.practice_evaluations : [];
       existingEvaluations.push(evaluationData);
       await browser.storage.local.set({ practice_evaluations: existingEvaluations });
 
@@ -138,8 +115,6 @@ export class PracticeStateMachine {
         this.state.currentSubtitle = this.subtitles[this.state.currentSubtitleIndex];
         this.state.videoTimestamp = this.state.currentSubtitle.start; // Set timestamp to new subtitle
         this.state.mode = PracticeMode.FLASHCARD_PRACTICE;
-        this.state.flashcards = [];
-        this.state.currentFlashcardIndex = 0;
         this.onStateChange(this.state);
       } else {
         this.endPractice();

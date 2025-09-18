@@ -1,191 +1,192 @@
 import type { Card, ReviewLog, FSRS, Grade } from 'ts-fsrs';
 import { createEmptyCard, fsrs, Rating } from 'ts-fsrs';
 import type { VocabItem } from '../types/index.js';
-import browser from 'webextension-polyfill';
-
-export interface VocabCard {
-  id: string;
-  vocab: VocabItem;
-  fsrsCard: Card;
-  created: string; // ISO date
-  lastPicked?: string; // Track when last picked to prevent consecutive duplicates
-}
+import { VocabCacheManager } from './vocab-cache-manager.js';
 
 export class FSRSCardManager {
   private scheduler: FSRS = fsrs();
-  private storageKey = 'vocab_cards';
+  public cacheManager = new VocabCacheManager(); // Public for PracticeController access
 
-  async getStoredCards(): Promise<VocabCard[]> {
-    const result = await browser.storage.local.get([this.storageKey]);
-
-    if (!result.vocab_cards) {
-      return [];
-    }
-
-    try {
-      const cards = JSON.parse(result.vocab_cards) as VocabCard[];
-      return cards.map(card => ({
-        ...card,
-        fsrsCard: this.deserializeCard(card.fsrsCard)
-      }));
-    } catch (error) {
-      console.error('Error parsing stored cards:', error);
-      return [];
-    }
-  }
-
-  async saveCards(cards: VocabCard[]): Promise<void> {
-    const serializedCards = cards.map(card => ({
-      ...card,
-      fsrsCard: this.serializeCard(card.fsrsCard)
-    }));
-
-    await browser.storage.local.set({
-      [this.storageKey]: JSON.stringify(serializedCards)
-    });
-  }
-
-  async createCard(vocab: VocabItem): Promise<VocabCard> {
-    const id = `vocab_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-    const fsrsCard = createEmptyCard(new Date()); // Use the CORRECT function for new cards
-
-    const vocabCard: VocabCard = {
-      id,
-      vocab,
+  /**
+   * Create FSRS card for vocabulary item (embeds in VocabItem)
+   */
+  async createCard(vocab: VocabItem): Promise<VocabItem> {
+    // Create new FSRS card using correct function
+    const fsrsCard = createEmptyCard(new Date());
+    
+    const updatedVocab: VocabItem = {
+      ...vocab,
       fsrsCard,
-      created: new Date().toISOString(),
-      lastPicked: undefined
+      created: vocab.created || new Date().toISOString(),
+      lastPicked: new Date().toISOString()
     };
 
-    const existingCards = await this.getStoredCards();
-    existingCards.push(vocabCard);
-    await this.saveCards(existingCards);
-
-    return vocabCard;
+    // Update global vocabulary cache
+    await this.cacheManager.updateGlobalVocabEntry(updatedVocab);
+    
+    return updatedVocab;
   }
 
-  async reviewCard(cardId: string, grade: Grade): Promise<{ card: VocabCard; log: ReviewLog }> {
-    const cards = await this.getStoredCards();
-    const cardIndex = cards.findIndex(c => c.id === cardId);
-
-    if (cardIndex === -1) {
-      throw new Error(`Card with id ${cardId} not found`);
+  /**
+   * Review vocabulary card and update FSRS data
+   */
+  async reviewCard(vocab: VocabItem, grade: Grade): Promise<{ vocab: VocabItem; log: ReviewLog }> {
+    console.log(`[FSRS] Reviewing card "${vocab.original}" with grade: ${grade}`);
+    
+    if (!vocab.fsrsCard) {
+      throw new Error(`No FSRS card data found for vocabulary: ${vocab.original}`);
     }
 
-    const card = cards[cardIndex];
+    console.log(`[FSRS] BEFORE review - Card data:`, JSON.stringify(vocab.fsrsCard, null, 2));
+
     const reviewDate = new Date();
-    const schedulingInfo = this.scheduler.repeat(card.fsrsCard, reviewDate);
+    const schedulingInfo = this.scheduler.repeat(vocab.fsrsCard, reviewDate);
     const selectedResult = schedulingInfo[grade];
 
-    const updatedCard: VocabCard = {
-      ...card,
+    console.log(`[FSRS] AFTER FSRS scheduling - Card data:`, JSON.stringify(selectedResult.card, null, 2));
+
+    const updatedVocab: VocabItem = {
+      ...vocab,
       fsrsCard: selectedResult.card,
-      lastReviewed: reviewDate.toISOString(),
       lastPicked: reviewDate.toISOString()
     };
 
     // Special handling for "Wrong" (Again) button - set due immediately
-    if (grade === Rating.Again) {
-      updatedCard.fsrsCard.due = new Date();
+    if (grade === Rating.Again && updatedVocab.fsrsCard) {
+      console.log(`[FSRS] Grade is Again - setting due to now`);
+      updatedVocab.fsrsCard.due = new Date();
     }
 
-    cards[cardIndex] = updatedCard;
-    await this.saveCards(cards);
+    console.log(`[FSRS] Final updated vocab:`, JSON.stringify(updatedVocab, null, 2));
 
-    return { card: updatedCard, log: selectedResult.log };
+    // Update global vocabulary cache
+    console.log(`[FSRS] Updating global cache for: "${vocab.original}"`);
+    await this.cacheManager.updateGlobalVocabEntry(updatedVocab);
+
+    // Verify the update worked
+    const verifyVocab = await this.cacheManager.getGlobalVocabEntry(vocab.original);
+    console.log(`[FSRS] Verification - vocab from cache after update:`, JSON.stringify(verifyVocab, null, 2));
+
+    return { vocab: updatedVocab, log: selectedResult.log };
   }
 
+  /**
+   * Get card status for vocabulary item (queries global cache for fresh data)
+   */
   async getCardStatus(vocab: VocabItem): Promise<'NEW' | 'DUE' | 'NOT_DUE'> {
-    const cards = await this.getStoredCards();
-    const existingCard = cards.find(card => card.vocab.original === vocab.original);
-
-    if (!existingCard) {
+    console.log(`[FSRS] Checking card status for: "${vocab.original}"`);
+    
+    // Query global cache for most up-to-date FSRS data
+    const globalVocab = await this.cacheManager.getGlobalVocabEntry(vocab.original);
+    
+    if (!globalVocab?.fsrsCard) {
+      console.log(`[FSRS] Card is NEW - no FSRS data found for: "${vocab.original}"`);
       return 'NEW';
     }
 
     const currentDate = new Date();
-    return currentDate >= existingCard.fsrsCard.due ? 'DUE' : 'NOT_DUE';
+    const dueDate = globalVocab.fsrsCard.due;
+    const status = currentDate >= dueDate ? 'DUE' : 'NOT_DUE';
+    
+    console.log(`[FSRS] Card "${vocab.original}" status: ${status}`);
+    console.log(`[FSRS] Current time: ${currentDate.toISOString()}`);
+    console.log(`[FSRS] Due time: ${dueDate.toISOString()}`);
+    console.log(`[FSRS] Time diff: ${currentDate.getTime() - dueDate.getTime()}ms`);
+    console.log(`[FSRS] FSRS card data:`, JSON.stringify(globalVocab.fsrsCard, null, 2));
+    
+    return status;
   }
 
-  async findExistingCard(vocab: VocabItem): Promise<VocabCard | null> {
-    const cards = await this.getStoredCards();
-    return cards.find(card => card.vocab.original === vocab.original) || null;
-  }
-
-  async getNextAvailableCard(vocabulary: VocabItem[], lastPickedId?: string): Promise<{vocab: VocabItem, status: 'NEW' | 'DUE', existingCard?: VocabCard} | null> {
-    // Step 1: Filter out last picked card (no-repeat constraint)
-    const eligibleVocab = vocabulary.filter(vocab =>
-      !lastPickedId || vocab.original !== lastPickedId
-    );
-
-    // Step 2: Collect all available cards (NEW or DUE)
-    const availableCards: {vocab: VocabItem, status: 'NEW' | 'DUE', existingCard?: VocabCard}[] = [];
-
-    for (const vocab of eligibleVocab) {
-      const status = await this.getCardStatus(vocab);
-      if (status === 'NEW' || status === 'DUE') {
-        const existingCard = status === 'DUE' ? await this.findExistingCard(vocab) : undefined;
-        availableCards.push({ vocab, status, existingCard });
-      }
-    }
-
-    // Step 3: Random selection from available cards
-    if (availableCards.length === 0) {
+  /**
+   * Get next available vocabulary for practice from segment storage (NEW or DUE)
+   */
+  async getNextAvailableVocabForSegment(videoId: string, segmentIndex: number, lastPickedOriginal?: string): Promise<VocabItem | null> {
+    console.log(`[FSRS] Getting next vocab for segment ${videoId}:${segmentIndex}, lastPicked: ${lastPickedOriginal}`);
+    
+    // Get all vocabulary for this segment from storage
+    const segmentVocabulary = await this.cacheManager.getSegmentVocabulary(videoId, segmentIndex);
+    
+    if (!segmentVocabulary || segmentVocabulary.length === 0) {
+      console.log(`[FSRS] No vocabulary found for segment`);
       return null;
     }
 
-    const shuffledCards = this.shuffleArray(availableCards);
-    return shuffledCards[0];
-  }
+    console.log(`[FSRS] Segment has ${segmentVocabulary.length} vocabulary items:`, segmentVocabulary.map(v => v.original));
 
-  async markCardAsPicked(vocab: VocabItem): Promise<void> {
-    const cards = await this.getStoredCards();
-    const cardIndex = cards.findIndex(card => card.vocab.original === vocab.original);
+    // Filter out last picked vocabulary (consecutive prevention)
+    const eligibleVocab = segmentVocabulary.filter(vocab =>
+      !lastPickedOriginal || vocab.original !== lastPickedOriginal
+    );
 
-    if (cardIndex !== -1) {
-      cards[cardIndex].lastPicked = new Date().toISOString();
-      await this.saveCards(cards);
+    console.log(`[FSRS] After filtering last picked (${lastPickedOriginal}), ${eligibleVocab.length} eligible:`, eligibleVocab.map(v => v.original));
+
+    // Get fresh vocabulary with current FSRS data from global cache
+    const availableVocab: VocabItem[] = [];
+    for (const vocab of eligibleVocab) {
+      console.log(`[FSRS] Checking eligibility for: "${vocab.original}"`);
+      
+      const freshVocab = await this.cacheManager.getGlobalVocabEntry(vocab.original);
+      const vocabularyToCheck = freshVocab || vocab; // Use fresh data if available
+      
+      const status = await this.getCardStatus(vocabularyToCheck);
+      console.log(`[FSRS] Status for "${vocab.original}": ${status}`);
+      
+      if (status === 'NEW' || status === 'DUE') {
+        console.log(`[FSRS] Adding "${vocab.original}" to available pool`);
+        availableVocab.push(vocabularyToCheck);
+      } else {
+        console.log(`[FSRS] Skipping "${vocab.original}" - status: ${status}`);
+      }
     }
-  }
 
-  async createAndMarkNewCard(vocab: VocabItem): Promise<VocabCard> {
-    const newCard = await this.createCard(vocab);
-    newCard.lastPicked = new Date().toISOString();
+    console.log(`[FSRS] Final available vocab count: ${availableVocab.length}`);
 
-    // Update the card in storage with lastPicked
-    const cards = await this.getStoredCards();
-    const cardIndex = cards.findIndex(card => card.id === newCard.id);
-    if (cardIndex !== -1) {
-      cards[cardIndex] = newCard;
-      await this.saveCards(cards);
+    // Random selection from available vocabulary
+    if (availableVocab.length === 0) {
+      console.log(`[FSRS] No available vocabulary to practice`);
+      return null;
     }
 
-    return newCard;
+    const shuffledVocab = this.shuffleArray(availableVocab);
+    const selected = shuffledVocab[0];
+    console.log(`[FSRS] Selected vocabulary: "${selected.original}"`);
+    return selected;
   }
 
-  private serializeCard(card: Card): Record<string, unknown> {
-    return {
-      ...card,
-      due: card.due.toISOString(),
-      last_review: card.last_review?.toISOString()
+  /**
+   * Get fresh vocabulary with FSRS data from global cache
+   */
+  async getFreshVocabWithFSRSData(original: string): Promise<VocabItem | null> {
+    return await this.cacheManager.getGlobalVocabEntry(original);
+  }
+
+  /**
+   * Check if segment has any available vocabulary for practice
+   */
+  async hasAvailableVocabInSegment(videoId: string, segmentIndex: number): Promise<boolean> {
+    const nextVocab = await this.getNextAvailableVocabForSegment(videoId, segmentIndex);
+    return nextVocab !== null;
+  }
+
+  /**
+   * Mark vocabulary as picked (updates global cache)
+   */
+  async markVocabAsPicked(vocab: VocabItem): Promise<VocabItem> {
+    const updatedVocab: VocabItem = {
+      ...vocab,
+      lastPicked: new Date().toISOString()
     };
+
+    // Update global vocabulary cache
+    await this.cacheManager.updateGlobalVocabEntry(updatedVocab);
+    
+    return updatedVocab;
   }
 
-  private deserializeCard(data: Record<string, unknown> | Card): Card {
-    // If already a Card object, return as-is
-    if (data instanceof Object && 'due' in data && data.due instanceof Date) {
-      return data as Card;
-    }
 
-    const serializedData = data as Record<string, unknown>;
-    return {
-      ...serializedData,
-      due: new Date(serializedData.due as string),
-      last_review: serializedData.last_review ? new Date(serializedData.last_review as string) : undefined
-    } as Card;
-  }
-
-  // Fisher-Yates shuffle for unbiased randomization
+  /**
+   * Fisher-Yates shuffle for unbiased randomization
+   */
   private shuffleArray<T>(array: T[]): T[] {
     const shuffled = [...array]; // Don't mutate original array
     for (let i = shuffled.length - 1; i > 0; i--) {
@@ -196,7 +197,9 @@ export class FSRSCardManager {
   }
 
 
-  // Convenience methods for rating
+  /**
+   * Convenience methods for rating
+   */
   static get Rating(): { Again: number; Hard: number; Good: number; Easy: number } {
     return {
       Again: Rating.Again,    // 1 - Wrong

@@ -2,9 +2,10 @@ import { PracticeStateMachine, PracticeMode, type PracticeState } from './practi
 import { SubtitleExtractor } from './subtitle-extractor.js';
 import { VideoController } from './video-controller.js';
 import { VocabExtractor } from './vocab-extractor.js';
-import { FSRSCardManager, type VocabCard } from './fsrs-card-manager.js';
+import { FSRSCardManager } from './fsrs-card-manager.js';
 import { ApiKeyManager } from './api-key-manager.js';
 import { waitForElement } from '../utils/dom-utils.js';
+import { YouTubeHelpers } from '../utils/youtube-helpers.js';
 import type { VocabItem } from '../types/index.js';
 
 export class PracticeController {
@@ -15,13 +16,14 @@ export class PracticeController {
   private cardManager: FSRSCardManager;
   private originalVideoContainer: HTMLElement | null = null;
   private practiceContainer: HTMLElement | null = null;
-  private currentVocabulary: VocabItem[] = [];
-  private currentCard: VocabCard | null = null;
-  private currentCardStatus: 'NEW' | 'DUE' | null = null;
+  private currentVocab: VocabItem | null = null;
+  private currentVocabStatus: 'NEW' | 'DUE' | null = null;
   private isFlashcardRevealed: boolean = false;
-  private lastPickedVocabId: string | null = null;
+  private lastPickedVocabOriginal: string | null = null;
   private practiceEnded: boolean = false;
   private preservedEvaluationText: string = '';
+  private currentVideoId: string | null = null;
+  private currentSegmentIndex: number | null = null;
 
   constructor() {
     this.subtitleExtractor = new SubtitleExtractor();
@@ -197,7 +199,7 @@ export class PracticeController {
       this.resetStartPracticeButton();
 
       // Show user-friendly error message
-      const errorMessage = error.message || 'Unknown error occurred';
+      const errorMessage = (error as Error).message || 'Unknown error occurred';
       alert(`Unable to start practice:\n\n${errorMessage}\n\nPlease ensure:\n- The video has subtitles available\n- You have a stable internet connection\n- The video is fully loaded`);
     }
   }
@@ -215,60 +217,95 @@ export class PracticeController {
     if (this.practiceEnded) return; // Prevent UI creation after practice ended
     if (!state.currentSubtitle) return;
 
-    // Check if we moved to a new subtitle - reset vocabulary if so
-    const currentSubtitleText = state.currentSubtitle.text;
-    const isNewSubtitle = this.currentVocabulary.length === 0 ||
-                         !this.currentVocabulary.some(v => currentSubtitleText.includes(v.original));
+    // Get video ID for segment operations
+    const videoId = YouTubeHelpers.getVideoId();
+    if (!videoId) {
+      console.error('Could not get video ID');
+      this.stateMachine!.moveToAutoplay();
+      return;
+    }
 
-    // Extract vocabulary if not already done or if this is a new subtitle
-    if (isNewSubtitle) {
-      // Reset state for new subtitle
-      this.currentVocabulary = [];
-      this.lastPickedVocabId = null;
+    // Check if we moved to a new segment
+    const isNewSegment = this.currentVideoId !== videoId || this.currentSegmentIndex !== state.currentSubtitleIndex;
+
+    if (isNewSegment) {
+      // Reset state for new segment
+      this.currentVideoId = videoId;
+      this.currentSegmentIndex = state.currentSubtitleIndex;
+      this.lastPickedVocabOriginal = null;
+      
       try {
-        const vocabulary = await this.vocabExtractor.extractVocabulary(state.currentSubtitle.text, 'auto');
-
-        if (vocabulary.length === 0) {
-          // Skip to autoplay if no vocabulary
-          this.stateMachine!.moveToAutoplay();
+        // Ensure vocabulary exists for this segment (extract if needed)
+        await this.ensureSegmentVocabularyExists(videoId, state.currentSubtitleIndex, state.currentSubtitle.text);
+        
+        // Check if segment has any vocabulary at all
+        const hasVocab = await this.cardManager.hasAvailableVocabInSegment(videoId, state.currentSubtitleIndex);
+        if (!hasVocab) {
+          this.showNothingToPracticeScreen();
           return;
         }
-
-        this.currentVocabulary = vocabulary;
       } catch (error) {
-        console.error('Error extracting vocabulary:', error);
+        console.error('Error ensuring segment vocabulary:', error as Error);
         this.stateMachine!.moveToAutoplay();
         return;
       }
     }
 
-    // Get next available card
-    const nextCardInfo = await this.cardManager.getNextAvailableCard(this.currentVocabulary, this.lastPickedVocabId);
+    // Get next available vocabulary from storage
+    console.log(`[PRACTICE] Getting next vocab for segment ${videoId}:${state.currentSubtitleIndex}`);
+    const nextVocab = await this.cardManager.getNextAvailableVocabForSegment(
+      videoId, 
+      state.currentSubtitleIndex, 
+      this.lastPickedVocabOriginal || undefined
+    );
 
-    if (!nextCardInfo) {
-      // No more cards to show, go to autoplay
-      this.stateMachine!.moveToAutoplay();
+    if (!nextVocab) {
+      // No more vocabulary to show, show "nothing to practice" screen
+      console.log(`[PRACTICE] No more vocabulary available - showing nothing to practice screen`);
+      this.showNothingToPracticeScreen();
       return;
     }
 
-    // Set current card info
-    this.currentCardStatus = nextCardInfo.status;
-    this.lastPickedVocabId = nextCardInfo.vocab.original;
+    console.log(`[PRACTICE] Got next vocab: "${nextVocab.original}"`);
 
-    if (nextCardInfo.status === 'NEW') {
-      // Create new card for NEW vocabulary
-      this.currentCard = await this.cardManager.createAndMarkNewCard(nextCardInfo.vocab);
+    // Set current vocabulary info
+    const cardStatus = await this.cardManager.getCardStatus(nextVocab);
+    console.log(`[PRACTICE] Card status for "${nextVocab.original}": ${cardStatus}`);
+    this.currentVocabStatus = cardStatus === 'NOT_DUE' ? null : cardStatus;
+    this.lastPickedVocabOriginal = nextVocab.original;
+
+    if (this.currentVocabStatus === 'NEW') {
+      // Create new FSRS card for NEW vocabulary
+      this.currentVocab = await this.cardManager.createCard(nextVocab);
       this.isFlashcardRevealed = true; // NEW cards show front+back immediately
-    } else if (nextCardInfo.status === 'DUE' && nextCardInfo.existingCard) {
-      // Use existing card for DUE vocabulary
-      this.currentCard = nextCardInfo.existingCard;
-      await this.cardManager.markCardAsPicked(nextCardInfo.vocab);
+    } else if (this.currentVocabStatus === 'DUE') {
+      // Get fresh vocabulary with FSRS data from global cache for DUE cards
+      const freshVocab = await this.cardManager.getFreshVocabWithFSRSData(nextVocab.original);
+      if (!freshVocab) {
+        console.error(`Could not find fresh vocab data for DUE card: ${nextVocab.original}`);
+        await this.moveToNextCard();
+        return;
+      }
+      this.currentVocab = await this.cardManager.markVocabAsPicked(freshVocab);
       this.isFlashcardRevealed = false; // DUE cards start with reveal flow
     }
 
     // Replace video with flashcard UI
     this.replaceVideoWithFlashcard();
     this.addEndPracticeButton();
+  }
+
+  /**
+   * Ensure vocabulary exists for segment (extract if needed)
+   */
+  private async ensureSegmentVocabularyExists(videoId: string, segmentIndex: number, subtitleText: string): Promise<void> {
+    // Check if vocabulary already exists for this segment
+    const existingVocab = await this.cardManager.cacheManager.getSegmentVocabulary(videoId, segmentIndex);
+    
+    if (!existingVocab || existingVocab.length === 0) {
+      // Extract vocabulary using existing extraction logic
+      await this.vocabExtractor.extractVocabulary(subtitleText, 'auto', videoId, segmentIndex);
+    }
   }
 
   private replaceVideoWithFlashcard(): void {
@@ -283,7 +320,7 @@ export class PracticeController {
       document.body.appendChild(this.practiceContainer);
     }
 
-    if (!this.currentCard) return;
+    if (!this.currentVocab) return;
 
     // Build content based on card status and reveal state
     const content = this.buildFlashcardContent();
@@ -308,26 +345,27 @@ export class PracticeController {
   }
 
   private buildFlashcardContent(): string {
-    if (!this.currentCard) return '';
+    if (!this.currentVocab) return '';
 
     if (!this.isFlashcardRevealed) {
       // Show only front (for DUE cards)
-      return `<div style="${this.getForeignTextStyle()}">${this.currentCard.vocab.original}</div>`;
+      return `<div style="${this.getForeignTextStyle()}">${this.currentVocab.original}</div>`;
     } else {
       // Show front+back (for NEW cards immediately, DUE cards after reveal)
+      const translations = this.currentVocab.translations.join(', ');
       return `
-        <div style="${this.getForeignTextStyle()}">${this.currentCard.vocab.original}</div>
+        <div style="${this.getForeignTextStyle()}">${this.currentVocab.original}</div>
         <hr style="${this.getDividerStyle()}">
-        <div style="${this.getTranslationTextStyle()}">${this.currentCard.vocab.translation}</div>
+        <div style="${this.getTranslationTextStyle()}">${translations}</div>
       `;
     }
   }
 
   private buildFlashcardButtons(): string {
-    if (this.currentCardStatus === 'NEW') {
+    if (this.currentVocabStatus === 'NEW') {
       // NEW cards: only "I will remember" button
       return `<button class="remember-btn" style="${this.getRememberButtonStyle()}">I will remember</button>`;
-    } else if (this.currentCardStatus === 'DUE') {
+    } else if (this.currentVocabStatus === 'DUE') {
       if (!this.isFlashcardRevealed) {
         // DUE cards before reveal: "Reveal" button
         return `<button class="flashcard-reveal-btn" style="${this.getRevealButtonStyle()}">Reveal</button>`;
@@ -390,27 +428,75 @@ export class PracticeController {
 
   private async handleFlashcardRating(rating: number): Promise<void> {
     if (this.practiceEnded) return; // Prevent action after practice ended
-    if (!this.currentCard) return;
+    if (!this.currentVocab) return;
+
+    console.log(`[PRACTICE] Rating card "${this.currentVocab.original}" with rating: ${rating}`);
 
     try {
-      await this.cardManager.reviewCard(this.currentCard.id, rating);
+      const result = await this.cardManager.reviewCard(this.currentVocab, rating);
+      console.log(`[PRACTICE] Card rated successfully. New due date: ${result.vocab.fsrsCard?.due?.toISOString()}`);
     } catch (error) {
-      console.error('Error rating card:', error);
+      console.error('[PRACTICE] Error rating card:', error);
     }
 
+    console.log(`[PRACTICE] Moving to next card...`);
     await this.moveToNextCard();
   }
 
   private async moveToNextCard(): Promise<void> {
     if (this.practiceEnded) return; // Prevent action after practice ended
 
-    // Reset card state
-    this.currentCard = null;
-    this.currentCardStatus = null;
+    console.log(`[PRACTICE] Moving to next card - resetting state`);
+
+    // Reset vocabulary state
+    this.currentVocab = null;
+    this.currentVocabStatus = null;
     this.isFlashcardRevealed = false;
 
-    // Try to render next card, or move to autoplay if none left
+    console.log(`[PRACTICE] Re-rendering flashcard mode to get next card`);
+    // Try to render next card, or show "nothing to practice" if none left
     await this.renderFlashcardMode(this.stateMachine!.getCurrentState());
+  }
+
+  private showNothingToPracticeScreen(): void {
+    // Pause the video but keep it visible
+    this.videoController.pause();
+
+    if (!this.practiceContainer) {
+      this.practiceContainer = document.createElement('div');
+      this.practiceContainer.style.cssText = this.getBodyOverlayStyle();
+      document.body.appendChild(this.practiceContainer);
+    }
+
+    this.practiceContainer.innerHTML = `
+      <button class="fullscreen-end-practice-btn" style="${this.getFullscreenEndPracticeButtonStyle()}">End Practice</button>
+      <div style="${this.getFlashcardContainerStyle()}">
+        <div style="${this.getFlashcardStyle()}">
+          <div style="${this.getFlashcardContentStyle()}">
+            <div style="${this.getForeignTextStyle()}">Nothing more to practice</div>
+            <div style="${this.getTranslationTextStyle()}">You've completed all available vocabulary for this segment!</div>
+          </div>
+          <div style="${this.getFlashcardButtonsStyle()}">
+            <button class="watch-segment-btn" style="${this.getRevealButtonStyle()}">Watch Segment</button>
+          </div>
+        </div>
+      </div>
+    `;
+
+    // Add event listeners
+    const watchSegmentBtn = this.practiceContainer.querySelector('.watch-segment-btn');
+    if (watchSegmentBtn) {
+      watchSegmentBtn.addEventListener('click', () => {
+        if (this.practiceEnded) return;
+        this.stateMachine!.moveToAutoplay();
+      });
+    }
+
+    // End practice button for fullscreen mode
+    const endPracticeBtn = this.practiceContainer.querySelector('.fullscreen-end-practice-btn');
+    if (endPracticeBtn) {
+      endPracticeBtn.addEventListener('click', () => this.handleEndPractice());
+    }
   }
 
   private renderAutoplayMode(state: PracticeState): void {
@@ -551,11 +637,12 @@ export class PracticeController {
     this.practiceEnded = true;
 
     // Reset all instance variables to initial state
-    this.currentVocabulary = [];
-    this.currentCard = null;
-    this.currentCardStatus = null;
+    this.currentVocab = null;
+    this.currentVocabStatus = null;
     this.isFlashcardRevealed = false;
-    this.lastPickedVocabId = null;
+    this.lastPickedVocabOriginal = null;
+    this.currentVideoId = null;
+    this.currentSegmentIndex = null;
 
     // Immediate DOM cleanup - don't wait for state machine
     if (this.practiceContainer) {

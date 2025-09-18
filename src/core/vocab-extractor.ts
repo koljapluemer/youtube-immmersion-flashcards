@@ -1,8 +1,19 @@
 import type { VocabItem } from '../types/index.js';
 import { ApiKeyManager } from './api-key-manager.js';
+import { VocabCacheManager } from './vocab-cache-manager.js';
 
 export class VocabExtractor {
-  async extractVocabulary(subtitleText: string, sourceLanguage: string): Promise<VocabItem[]> {
+  private cacheManager = new VocabCacheManager();
+
+  async extractVocabulary(subtitleText: string, sourceLanguage: string, videoId?: string, segmentIndex?: number): Promise<VocabItem[]> {
+    // Check cache first if video ID and segment index are provided
+    if (videoId && segmentIndex !== undefined) {
+      const cachedVocabulary = await this.cacheManager.getSegmentVocabulary(videoId, segmentIndex);
+      if (cachedVocabulary) {
+        console.log(`Using cached vocabulary for video ${videoId}, segment ${segmentIndex}`);
+        return cachedVocabulary;
+      }
+    }
     const apiKey = await ApiKeyManager.getStoredKey();
     if (!apiKey) {
       throw new Error('OpenAI API key not found');
@@ -43,7 +54,17 @@ export class VocabExtractor {
       console.log(`OpenAI Response for text: ${subtitleText}\n${content}\n`);
 
       const parsed = JSON.parse(content);
-      return this.parseVocabularyResponse(parsed);
+      const rawVocabulary = this.parseVocabularyResponse(parsed);
+      
+      // Process and enrich vocabulary through cache manager
+      const enrichedVocabulary = await this.cacheManager.processNewVocabulary(rawVocabulary);
+      
+      // Cache the segment vocabulary if video ID and segment index are provided
+      if (videoId && segmentIndex !== undefined) {
+        await this.cacheManager.cacheSegmentVocabulary(videoId, segmentIndex, enrichedVocabulary);
+      }
+      
+      return enrichedVocabulary;
 
     } catch (error) {
       console.error('Error extracting vocabulary:', error);
@@ -74,7 +95,7 @@ Subtitle snippet to analyze:
 ${subtitleText}`;
   }
 
-  private parseVocabularyResponse(parsed: unknown): VocabItem[] {
+  private parseVocabularyResponse(parsed: unknown): Array<{ original: string; translation: string }> {
     // Accept both array and object with 'vocabulary' or 'words' keys
     if (Array.isArray(parsed)) {
       return this.mapToVocabItems(parsed);
@@ -95,7 +116,7 @@ ${subtitleText}`;
     return [];
   }
 
-  private mapToVocabItems(items: unknown[]): VocabItem[] {
+  private mapToVocabItems(items: unknown[]): Array<{ original: string; translation: string }> {
     return items
       .map(item => {
         if (typeof item === 'object' && item !== null) {
@@ -109,6 +130,6 @@ ${subtitleText}`;
         }
         return null;
       })
-      .filter((item): item is VocabItem => item !== null);
+      .filter((item): item is { original: string; translation: string } => item !== null);
   }
 }
