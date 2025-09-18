@@ -252,7 +252,6 @@ export class PracticeController {
     }
 
     // Get next available vocabulary from storage
-    console.log(`[PRACTICE] Getting next vocab for segment ${videoId}:${state.currentSubtitleIndex}`);
     const nextVocab = await this.cardManager.getNextAvailableVocabForSegment(
       videoId, 
       state.currentSubtitleIndex, 
@@ -261,16 +260,12 @@ export class PracticeController {
 
     if (!nextVocab) {
       // No more vocabulary to show, show "nothing to practice" screen
-      console.log(`[PRACTICE] No more vocabulary available - showing nothing to practice screen`);
       this.showNothingToPracticeScreen();
       return;
     }
 
-    console.log(`[PRACTICE] Got next vocab: "${nextVocab.original}"`);
-
     // Set current vocabulary info
     const cardStatus = await this.cardManager.getCardStatus(nextVocab);
-    console.log(`[PRACTICE] Card status for "${nextVocab.original}": ${cardStatus}`);
     this.currentVocabStatus = cardStatus === 'NOT_DUE' ? null : cardStatus;
     this.lastPickedVocabOriginal = nextVocab.original;
 
@@ -430,30 +425,23 @@ export class PracticeController {
     if (this.practiceEnded) return; // Prevent action after practice ended
     if (!this.currentVocab) return;
 
-    console.log(`[PRACTICE] Rating card "${this.currentVocab.original}" with rating: ${rating}`);
-
     try {
-      const result = await this.cardManager.reviewCard(this.currentVocab, rating);
-      console.log(`[PRACTICE] Card rated successfully. New due date: ${result.vocab.fsrsCard?.due?.toISOString()}`);
+      await this.cardManager.reviewCard(this.currentVocab, rating);
     } catch (error) {
-      console.error('[PRACTICE] Error rating card:', error);
+      console.error('Error rating card:', error);
     }
 
-    console.log(`[PRACTICE] Moving to next card...`);
     await this.moveToNextCard();
   }
 
   private async moveToNextCard(): Promise<void> {
     if (this.practiceEnded) return; // Prevent action after practice ended
 
-    console.log(`[PRACTICE] Moving to next card - resetting state`);
-
     // Reset vocabulary state
     this.currentVocab = null;
     this.currentVocabStatus = null;
     this.isFlashcardRevealed = false;
 
-    console.log(`[PRACTICE] Re-rendering flashcard mode to get next card`);
     // Try to render next card, or show "nothing to practice" if none left
     await this.renderFlashcardMode(this.stateMachine!.getCurrentState());
   }
@@ -581,16 +569,13 @@ export class PracticeController {
     // Show loading state
     if (saveBtn) {
       const originalText = saveBtn.textContent;
-      console.log(`[PRACTICE] Starting save evaluation - showing loading state`);
       saveBtn.textContent = 'Loading...';
       saveBtn.disabled = true;
       saveBtn.style.opacity = '0.6';
       saveBtn.style.cursor = 'not-allowed';
 
       try {
-        console.log(`[PRACTICE] Calling saveEvaluationAndNext - may trigger OpenAI API call`);
         await this.stateMachine!.saveEvaluationAndNext(evaluation);
-        console.log(`[PRACTICE] saveEvaluationAndNext completed successfully`);
       } catch (error) {
         console.error('Error saving evaluation:', error);
         // Restore button state on error
