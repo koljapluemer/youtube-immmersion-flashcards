@@ -4,6 +4,7 @@ import { VideoController } from './video-controller.js';
 import { VocabExtractor } from './vocab-extractor.js';
 import { FSRSCardManager, type VocabCard } from './fsrs-card-manager.js';
 import { ApiKeyManager } from './api-key-manager.js';
+import { waitForElement } from '../utils/dom-utils.js';
 import type { VocabItem } from '../types/index.js';
 
 export class PracticeController {
@@ -39,18 +40,10 @@ export class PracticeController {
         throw new Error('Could not find video container');
       }
 
-      // Extract subtitles
-      const subtitles = await this.subtitleExtractor.extractSubtitles();
+      // Always show button first, regardless of subtitle availability
+      await this.renderCurrentMode();
 
-      if (!subtitles || subtitles.length === 0) {
-        throw new Error('No subtitles found for this video');
-      }
-
-      // Initialize state machine
-      this.stateMachine = new PracticeStateMachine(subtitles, (state) => this.handleStateChange(state));
-
-      // Start in video watching mode
-      this.renderCurrentMode();
+      console.log('[Practice Controller] Initialization completed, button should now be visible');
 
     } catch (error) {
       console.error('Failed to initialize practice controller:', error);
@@ -58,22 +51,26 @@ export class PracticeController {
     }
   }
 
-  private handleStateChange(state: PracticeState): void {
+  private async handleStateChange(state: PracticeState): Promise<void> {
     console.log('State changed to:', state.mode);
-    this.renderCurrentMode();
+    await this.renderCurrentMode();
   }
 
-  private renderCurrentMode(): void {
-    if (!this.stateMachine) return;
+  private async renderCurrentMode(): Promise<void> {
+    if (!this.stateMachine) {
+      // No state machine yet - show button for video watching mode
+      await this.renderVideoWatchingMode();
+      return;
+    }
 
     const state = this.stateMachine.getCurrentState();
 
     switch (state.mode) {
       case PracticeMode.VIDEO_WATCHING:
-        this.renderVideoWatchingMode();
+        await this.renderVideoWatchingMode();
         break;
       case PracticeMode.FLASHCARD_PRACTICE:
-        this.renderFlashcardMode(state);
+        await this.renderFlashcardMode(state);
         break;
       case PracticeMode.AUTOPLAY:
         this.renderAutoplayMode(state);
@@ -84,12 +81,12 @@ export class PracticeController {
     }
   }
 
-  private renderVideoWatchingMode(): void {
+  private async renderVideoWatchingMode(): Promise<void> {
     // Show normal video
     this.showOriginalVideo();
 
     // Add Start Practice button
-    this.addStartPracticeButton();
+    await this.addStartPracticeButton();
   }
 
   private showOriginalVideo(): void {
@@ -100,37 +97,61 @@ export class PracticeController {
     // Video is always visible now, no need to change display
   }
 
-  private addStartPracticeButton(): void {
-    // Remove existing button
-    const existingButton = document.querySelector('.youtube-practice-button');
-    if (existingButton) {
-      existingButton.remove();
+  private async addStartPracticeButton(): Promise<void> {
+    try {
+      // Remove existing button
+      const existingButton = document.querySelector('.youtube-practice-button');
+      if (existingButton) {
+        existingButton.remove();
+      }
+
+      console.log('[Practice Controller] Waiting for video title element...');
+
+      // Wait for video title element to be available
+      const videoTitle = await waitForElement('h1.ytd-watch-metadata yt-formatted-string', {
+        timeout: 10000 // 10 seconds timeout
+      });
+
+      if (!videoTitle.parentElement) {
+        throw new Error('Video title element has no parent');
+      }
+
+      console.log('[Practice Controller] Video title found, adding button...');
+
+      const button = document.createElement('button');
+      button.className = 'youtube-practice-button';
+      button.textContent = 'Start Practice';
+      button.style.cssText = this.getYouTubeButtonStyle();
+
+      button.addEventListener('click', () => this.handleStartPractice());
+
+      // Add hover effect
+      button.addEventListener('mouseenter', () => {
+        button.style.background = '#e5e5e5';
+      });
+      button.addEventListener('mouseleave', () => {
+        button.style.background = '#f1f1f1';
+      });
+
+      videoTitle.parentElement.insertBefore(button, videoTitle);
+      console.log('[Practice Controller] Start Practice button added successfully');
+
+    } catch (error) {
+      console.error('[Practice Controller] Failed to add Start Practice button:', error);
+
+      // Retry once after a delay
+      setTimeout(async () => {
+        console.log('[Practice Controller] Retrying button placement...');
+        try {
+          await this.addStartPracticeButton();
+        } catch (retryError) {
+          console.error('[Practice Controller] Button placement retry also failed:', retryError);
+        }
+      }, 2000);
     }
-
-    const videoTitle = document.querySelector('h1.ytd-watch-metadata yt-formatted-string');
-    if (!videoTitle?.parentElement) return;
-
-    const button = document.createElement('button');
-    button.className = 'youtube-practice-button';
-    button.textContent = 'Start Practice';
-    button.style.cssText = this.getYouTubeButtonStyle();
-
-    button.addEventListener('click', () => this.handleStartPractice());
-
-    // Add hover effect
-    button.addEventListener('mouseenter', () => {
-      button.style.background = '#e5e5e5';
-    });
-    button.addEventListener('mouseleave', () => {
-      button.style.background = '#f1f1f1';
-    });
-
-    videoTitle.parentElement.insertBefore(button, videoTitle);
   }
 
   private async handleStartPractice(): Promise<void> {
-    if (!this.stateMachine) return;
-
     // Reset cancellation flag for new practice session
     this.practiceEnded = false;
 
@@ -143,11 +164,26 @@ export class PracticeController {
     }
 
     try {
-      // Ensure API key
+      // Ensure API key first
       const apiKey = await ApiKeyManager.ensureOpenAIKey();
       if (!apiKey) {
         this.resetStartPracticeButton();
         return;
+      }
+
+      // Load subtitles on-demand if not already loaded
+      if (!this.stateMachine) {
+        console.log('[Practice Controller] Loading subtitles...');
+
+        const subtitles = await this.subtitleExtractor.extractSubtitles();
+
+        if (!subtitles || subtitles.length === 0) {
+          throw new Error('No subtitles found for this video. Please make sure the video has subtitles enabled.');
+        }
+
+        // Initialize state machine with loaded subtitles
+        this.stateMachine = new PracticeStateMachine(subtitles, (state) => this.handleStateChange(state));
+        console.log('[Practice Controller] Subtitles loaded successfully');
       }
 
       // Get current video time
@@ -159,7 +195,10 @@ export class PracticeController {
     } catch (error) {
       console.error('Error starting practice:', error);
       this.resetStartPracticeButton();
-      alert('Error starting practice: ' + error.message);
+
+      // Show user-friendly error message
+      const errorMessage = error.message || 'Unknown error occurred';
+      alert(`Unable to start practice:\n\n${errorMessage}\n\nPlease ensure:\n- The video has subtitles available\n- You have a stable internet connection\n- The video is fully loaded`);
     }
   }
 
@@ -492,7 +531,7 @@ export class PracticeController {
     videoTitle.parentElement.insertBefore(button, videoTitle);
   }
 
-  private handleEndPractice(): void {
+  private async handleEndPractice(): Promise<void> {
     if (!this.stateMachine) return;
 
     const currentState = this.stateMachine.getCurrentState();
@@ -504,7 +543,7 @@ export class PracticeController {
     this.resetAllState();
 
     // Re-render video watching mode to ensure clean state
-    this.renderVideoWatchingMode();
+    await this.renderVideoWatchingMode();
   }
 
   private resetAllState(): void {
