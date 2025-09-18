@@ -574,10 +574,37 @@ export class PracticeController {
   private async handleSaveEvaluation(): Promise<void> {
     if (this.practiceEnded) return; // Prevent action after practice ended
 
+    const saveBtn = this.practiceContainer?.querySelector('.save-next-btn') as HTMLButtonElement;
     const textarea = this.practiceContainer?.querySelector('.evaluation-input') as HTMLTextAreaElement;
     const evaluation = textarea?.value || '';
 
-    await this.stateMachine!.saveEvaluationAndNext(evaluation);
+    // Show loading state
+    if (saveBtn) {
+      const originalText = saveBtn.textContent;
+      console.log(`[PRACTICE] Starting save evaluation - showing loading state`);
+      saveBtn.textContent = 'Loading...';
+      saveBtn.disabled = true;
+      saveBtn.style.opacity = '0.6';
+      saveBtn.style.cursor = 'not-allowed';
+
+      try {
+        console.log(`[PRACTICE] Calling saveEvaluationAndNext - may trigger OpenAI API call`);
+        await this.stateMachine!.saveEvaluationAndNext(evaluation);
+        console.log(`[PRACTICE] saveEvaluationAndNext completed successfully`);
+      } catch (error) {
+        console.error('Error saving evaluation:', error);
+        // Restore button state on error
+        if (saveBtn && originalText) {
+          saveBtn.textContent = originalText;
+          saveBtn.disabled = false;
+          saveBtn.style.opacity = '1';
+          saveBtn.style.cursor = 'pointer';
+        }
+      }
+    } else {
+      // Fallback if button not found
+      await this.stateMachine!.saveEvaluationAndNext(evaluation);
+    }
   }
 
   private handleRewatchSegment(): void {
