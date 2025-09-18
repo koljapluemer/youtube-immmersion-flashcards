@@ -1,11 +1,12 @@
 import type { POTTokenManager, CaptionTrack } from '../types/index.js';
+import browser from 'webextension-polyfill';
 
 export class YouTubeHelpers {
   static initializePOTTokenCapture(): POTTokenManager {
     let poToken = null;
 
     const script = document.createElement('script');
-    script.src = chrome.runtime.getURL('injected.js');
+    script.src = browser.runtime.getURL('injected.js');
     script.onload = (): void => {
       console.log('[Content Script] injected.js loaded');
       script.remove();

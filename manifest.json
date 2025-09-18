@@ -3,6 +3,11 @@
   "name": "YouTube Immersion Flashcards",
   "version": "1.0",
   "description": "Learn vocabulary from YouTube videos using spaced repetition flashcards",
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "youtube-immersion-flashcards@koljapluemer.com"
+    }
+  },
   "permissions": ["storage"],
   "host_permissions": ["*://*.youtube.com/*", "*://api.openai.com/*"],
   "web_accessible_resources": [

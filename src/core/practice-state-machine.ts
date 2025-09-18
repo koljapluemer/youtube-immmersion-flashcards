@@ -1,5 +1,6 @@
 import type { TimedSubtitle } from '../types/index.js';
 import type { VocabCard } from './fsrs-card-manager.js';
+import browser from 'webextension-polyfill';
 
 export enum PracticeMode {
   VIDEO_WATCHING = 'VIDEO_WATCHING',
@@ -106,9 +107,9 @@ export class PracticeStateMachine {
     this.onStateChange(this.state);
   }
 
-  saveEvaluationAndNext(evaluation: string): void {
+  async saveEvaluationAndNext(evaluation: string): Promise<void> {
     if (this.state.mode === PracticeMode.EVALUATION && this.state.currentSubtitle) {
-      // Save to localStorage
+      // Save to browser storage
       const videoId = new URLSearchParams(window.location.search).get('v');
       const evaluationData = {
         videoId,
@@ -119,9 +120,10 @@ export class PracticeStateMachine {
         savedAt: new Date().toISOString()
       };
 
-      const existingEvaluations = JSON.parse(localStorage.getItem('practice_evaluations') || '[]');
+      const result = await browser.storage.local.get(['practice_evaluations']);
+      const existingEvaluations = result.practice_evaluations || [];
       existingEvaluations.push(evaluationData);
-      localStorage.setItem('practice_evaluations', JSON.stringify(existingEvaluations));
+      await browser.storage.local.set({ practice_evaluations: existingEvaluations });
 
       // Move to next subtitle
       if (this.state.currentSubtitleIndex < this.state.totalSubtitles - 1) {

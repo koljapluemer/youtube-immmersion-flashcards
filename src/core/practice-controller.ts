@@ -415,11 +415,11 @@ export class PracticeController {
     }
   }
 
-  private handleSaveEvaluation(): void {
+  private async handleSaveEvaluation(): Promise<void> {
     const textarea = this.practiceContainer?.querySelector('.evaluation-input') as HTMLTextAreaElement;
     const evaluation = textarea?.value || '';
 
-    this.stateMachine!.saveEvaluationAndNext(evaluation);
+    await this.stateMachine!.saveEvaluationAndNext(evaluation);
   }
 
   private hideOriginalVideo(): void {

@@ -1,6 +1,7 @@
 import type { Card, ReviewLog, FSRS, Grade } from 'ts-fsrs';
 import { createEmptyCard, fsrs, Rating } from 'ts-fsrs';
 import type { VocabItem } from '../types/index.js';
+import browser from 'webextension-polyfill';
 
 export interface VocabCard {
   id: string;
@@ -15,9 +16,7 @@ export class FSRSCardManager {
   private storageKey = 'vocab_cards';
 
   async getStoredCards(): Promise<VocabCard[]> {
-    const result = await new Promise<{vocab_cards?: string}>((resolve) => {
-      chrome.storage.local.get([this.storageKey], resolve);
-    });
+    const result = await browser.storage.local.get([this.storageKey]);
 
     if (!result.vocab_cards) {
       return [];
@@ -41,10 +40,8 @@ export class FSRSCardManager {
       fsrsCard: this.serializeCard(card.fsrsCard)
     }));
 
-    return new Promise((resolve) => {
-      chrome.storage.local.set({
-        [this.storageKey]: JSON.stringify(serializedCards)
-      }, resolve);
+    await browser.storage.local.set({
+      [this.storageKey]: JSON.stringify(serializedCards)
     });
   }
 

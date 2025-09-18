@@ -1,9 +1,9 @@
+import browser from 'webextension-polyfill';
+
 export class ApiKeyManager {
   static async ensureOpenAIKey(): Promise<string | null> {
-    // Try to get existing key from chrome storage
-    const result = await new Promise<{openai_api_key?: string}>((resolve) => {
-      chrome.storage.local.get(['openai_api_key'], resolve);
-    });
+    // Try to get existing key from browser storage
+    const result = await browser.storage.sync.get(['openai_api_key']);
 
     if (result.openai_api_key) {
       console.log('OpenAI API key found in storage');
@@ -24,7 +24,7 @@ export class ApiKeyManager {
       return null;
     }
 
-    // Store the key securely in chrome storage
+    // Store the key securely in browser storage
     await ApiKeyManager.storeKey(apiKey);
     console.log('OpenAI API key saved to storage');
     return apiKey;
@@ -35,21 +35,15 @@ export class ApiKeyManager {
   }
 
   static async storeKey(apiKey: string): Promise<void> {
-    return new Promise((resolve) => {
-      chrome.storage.local.set({ 'openai_api_key': apiKey }, resolve);
-    });
+    await browser.storage.sync.set({ 'openai_api_key': apiKey });
   }
 
   static async getStoredKey(): Promise<string | null> {
-    const result = await new Promise<{openai_api_key?: string}>((resolve) => {
-      chrome.storage.local.get(['openai_api_key'], resolve);
-    });
+    const result = await browser.storage.sync.get(['openai_api_key']);
     return result.openai_api_key || null;
   }
 
   static async clearKey(): Promise<void> {
-    return new Promise((resolve) => {
-      chrome.storage.local.remove(['openai_api_key'], resolve);
-    });
+    await browser.storage.sync.remove(['openai_api_key']);
   }
 }
