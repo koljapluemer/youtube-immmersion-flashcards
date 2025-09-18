@@ -19,6 +19,7 @@ export class PracticeController {
   private currentCardStatus: 'NEW' | 'DUE' | null = null;
   private isFlashcardRevealed: boolean = false;
   private lastPickedVocabId: string | null = null;
+  private practiceEnded: boolean = false;
 
   constructor() {
     this.subtitleExtractor = new SubtitleExtractor();
@@ -129,6 +130,9 @@ export class PracticeController {
   private async handleStartPractice(): Promise<void> {
     if (!this.stateMachine) return;
 
+    // Reset cancellation flag for new practice session
+    this.practiceEnded = false;
+
     // Update button to loading state
     const button = document.querySelector('.youtube-practice-button') as HTMLButtonElement;
     if (button) {
@@ -168,6 +172,7 @@ export class PracticeController {
   }
 
   private async renderFlashcardMode(state: PracticeState): Promise<void> {
+    if (this.practiceEnded) return; // Prevent UI creation after practice ended
     if (!state.currentSubtitle) return;
 
     // Check if we moved to a new subtitle - reset vocabulary if so
@@ -337,11 +342,14 @@ export class PracticeController {
   }
 
   private async handleRememberCard(): Promise<void> {
+    if (this.practiceEnded) return; // Prevent action after practice ended
+
     // For NEW cards, just move to next card (card already created and persisted)
     await this.moveToNextCard();
   }
 
   private async handleFlashcardRating(rating: number): Promise<void> {
+    if (this.practiceEnded) return; // Prevent action after practice ended
     if (!this.currentCard) return;
 
     try {
@@ -354,6 +362,8 @@ export class PracticeController {
   }
 
   private async moveToNextCard(): Promise<void> {
+    if (this.practiceEnded) return; // Prevent action after practice ended
+
     // Reset card state
     this.currentCard = null;
     this.currentCardStatus = null;
@@ -416,6 +426,8 @@ export class PracticeController {
   }
 
   private async handleSaveEvaluation(): Promise<void> {
+    if (this.practiceEnded) return; // Prevent action after practice ended
+
     const textarea = this.practiceContainer?.querySelector('.evaluation-input') as HTMLTextAreaElement;
     const evaluation = textarea?.value || '';
 
@@ -453,14 +465,47 @@ export class PracticeController {
 
     const currentState = this.stateMachine.getCurrentState();
 
-    // In autoplay mode, pause the video first
-    if (currentState.mode === PracticeMode.AUTOPLAY) {
-      this.videoController.pause();
+    // Restore video to original timestamp (do this before cleanup)
+    this.videoController.setCurrentTime(currentState.videoTimestamp);
+
+    // Comprehensive cleanup - this prevents race conditions and UI persistence
+    this.resetAllState();
+
+    // Re-render video watching mode to ensure clean state
+    this.renderVideoWatchingMode();
+  }
+
+  private resetAllState(): void {
+    // Set cancellation flag
+    this.practiceEnded = true;
+
+    // Reset all instance variables to initial state
+    this.currentVocabulary = [];
+    this.currentCard = null;
+    this.currentCardStatus = null;
+    this.isFlashcardRevealed = false;
+    this.lastPickedVocabId = null;
+
+    // Immediate DOM cleanup - don't wait for state machine
+    if (this.practiceContainer) {
+      this.practiceContainer.remove();
+      this.practiceContainer = null;
     }
 
-    // Restore video to original timestamp and end practice
-    this.videoController.setCurrentTime(currentState.videoTimestamp);
-    this.stateMachine.endPractice();
+    // Remove any practice buttons
+    const existingButton = document.querySelector('.youtube-practice-button');
+    if (existingButton) {
+      existingButton.remove();
+    }
+
+    // Stop video operations and clean up event listeners
+    this.videoController.stopAndCleanup();
+
+    // Reset state machine to initial state
+    if (this.stateMachine) {
+      this.stateMachine.endPractice();
+      // Note: We could set stateMachine = null here if we want to force re-initialization
+    }
   }
 
   // YouTube-consistent styles

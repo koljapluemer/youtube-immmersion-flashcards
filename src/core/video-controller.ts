@@ -10,6 +10,7 @@ const TIMING = {
 export class VideoController {
   private videoElement: HTMLVideoElement | null;
   private originalVideoContainer: HTMLElement | null;
+  private activeTimeUpdateHandler: ((event: Event) => void) | null = null;
 
   constructor() {
     this.videoElement = null;
@@ -45,6 +46,9 @@ export class VideoController {
   }
 
   async playSegment(startTime: number, duration: number): Promise<void> {
+    // Clean up any existing handler first
+    this.cleanupActiveHandlers();
+
     return new Promise((resolve) => {
       if (!this.videoElement) {
         resolve();
@@ -58,13 +62,16 @@ export class VideoController {
       this.videoElement.play();
 
       const stopHandler = (): void => {
-        if (this.videoElement.currentTime >= endTime) {
+        if (this.videoElement && this.videoElement.currentTime >= endTime) {
           this.videoElement.pause();
           this.videoElement.removeEventListener('timeupdate', stopHandler);
+          this.activeTimeUpdateHandler = null; // Clear reference
           resolve();
         }
       };
 
+      // Track the active handler so we can clean it up later
+      this.activeTimeUpdateHandler = stopHandler;
       this.videoElement.addEventListener('timeupdate', stopHandler);
     });
   }
@@ -83,5 +90,17 @@ export class VideoController {
     if (this.videoElement) {
       this.videoElement.currentTime = time;
     }
+  }
+
+  cleanupActiveHandlers(): void {
+    if (this.activeTimeUpdateHandler && this.videoElement) {
+      this.videoElement.removeEventListener('timeupdate', this.activeTimeUpdateHandler);
+      this.activeTimeUpdateHandler = null;
+    }
+  }
+
+  stopAndCleanup(): void {
+    this.pause();
+    this.cleanupActiveHandlers();
   }
 }
