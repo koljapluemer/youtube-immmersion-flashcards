@@ -6,7 +6,10 @@ import { FSRSCardManager } from './fsrs-card-manager.js';
 import { ApiKeyManager } from './api-key-manager.js';
 import { waitForElement } from '../utils/dom-utils.js';
 import { YouTubeHelpers } from '../utils/youtube-helpers.js';
-import type { VocabItem } from '../types/index.js';
+import browser from 'webextension-polyfill';
+import type { VocabItem, CaptionTrack } from '../types/index.js';
+
+const SUBTITLE_SELECTION_CANCELLED = 'USER_CANCELLED_SUBTITLE_SELECTION';
 
 export class PracticeController {
   private stateMachine: PracticeStateMachine | null = null;
@@ -24,12 +27,20 @@ export class PracticeController {
   private preservedEvaluationText: string = '';
   private currentVideoId: string | null = null;
   private currentSegmentIndex: number | null = null;
+  private subtitleSelectionOverlay: HTMLDivElement | null = null;
 
   constructor() {
     this.subtitleExtractor = new SubtitleExtractor();
     this.videoController = new VideoController();
     this.vocabExtractor = new VocabExtractor();
     this.cardManager = new FSRSCardManager();
+  }
+
+  public resetForNewVideo(): void {
+    // Clear any lingering UI or state tied to the previous video
+    this.resetAllState();
+    this.stateMachine = null;
+    this.practiceEnded = false;
   }
 
   async initialize(): Promise<void> {
@@ -177,7 +188,14 @@ export class PracticeController {
       if (!this.stateMachine) {
         console.log('[Practice Controller] Loading subtitles...');
 
-        const subtitles = await this.subtitleExtractor.extractSubtitles();
+        const videoId = YouTubeHelpers.getVideoId();
+        if (!videoId) {
+          throw new Error('Could not determine current video ID');
+        }
+
+        const { captionTracks, defaultAudioLanguage } = await this.subtitleExtractor.getCaptionMetadata(videoId);
+        const selectedTrack = await this.chooseSubtitleTrack(videoId, captionTracks, defaultAudioLanguage);
+        const subtitles = await this.subtitleExtractor.fetchSubtitlesForTrack(selectedTrack);
 
         if (!subtitles || subtitles.length === 0) {
           throw new Error('No subtitles found for this video. Please make sure the video has subtitles enabled.');
@@ -195,6 +213,14 @@ export class PracticeController {
       this.stateMachine.startPractice(currentTime);
 
     } catch (error) {
+      this.removeSubtitleSelectionOverlay();
+
+      if ((error as Error).message === SUBTITLE_SELECTION_CANCELLED) {
+        console.log('[Practice Controller] Subtitle selection cancelled by user');
+        this.resetStartPracticeButton();
+        return;
+      }
+
       console.error('Error starting practice:', error);
       this.resetStartPracticeButton();
 
@@ -211,6 +237,269 @@ export class PracticeController {
       button.style.cssText = this.getYouTubeButtonStyle();
       button.disabled = false;
     }
+  }
+
+  private async chooseSubtitleTrack(
+    videoId: string,
+    captionTracks: CaptionTrack[],
+    defaultAudioLanguage: string | null
+  ): Promise<CaptionTrack> {
+    const storedKey = await this.getStoredSubtitlePreference(videoId);
+
+    if (storedKey) {
+      const storedTrack = captionTracks.find((track) => this.getSubtitleTrackKey(track) === storedKey);
+      if (storedTrack) {
+        console.log('[Practice Controller] Using stored subtitle preference:', storedKey);
+        return storedTrack;
+      }
+
+      await this.clearSubtitlePreference(videoId);
+    }
+
+    if (captionTracks.length === 1) {
+      console.log('[Practice Controller] Only one subtitle track available');
+      const soleTrack = captionTracks[0];
+      await this.saveSubtitlePreference(videoId, this.getSubtitleTrackKey(soleTrack));
+      return soleTrack;
+    }
+
+    const autoSelected = this.subtitleExtractor.selectBestCaptionTrack(captionTracks, defaultAudioLanguage);
+    return await this.promptForSubtitleTrack(videoId, captionTracks, autoSelected);
+  }
+
+  private promptForSubtitleTrack(
+    videoId: string,
+    captionTracks: CaptionTrack[],
+    preselectedTrack: CaptionTrack
+  ): Promise<CaptionTrack> {
+    return new Promise((resolve, reject) => {
+      this.removeSubtitleSelectionOverlay();
+
+      const overlay = document.createElement('div');
+      overlay.style.cssText = this.getSubtitleOverlayStyle();
+
+      const dialog = document.createElement('div');
+      dialog.style.cssText = this.getSubtitleDialogStyle();
+      overlay.appendChild(dialog);
+
+      const title = document.createElement('h3');
+      title.textContent = 'Select subtitles';
+      title.style.cssText = 'margin: 0 0 12px; font-size: 18px; font-weight: 600; color: #030303;';
+      dialog.appendChild(title);
+
+      const description = document.createElement('p');
+      description.textContent = 'Choose which subtitle track you want to practice with.';
+      description.style.cssText = 'margin: 0 0 16px; color: #606060; font-size: 14px; line-height: 1.5;';
+      dialog.appendChild(description);
+
+      const optionsContainer = document.createElement('div');
+      optionsContainer.style.cssText = 'display: flex; flex-direction: column; gap: 8px; max-height: 220px; overflow-y: auto; margin-bottom: 16px;';
+      dialog.appendChild(optionsContainer);
+
+      const preselectedKey = this.getSubtitleTrackKey(preselectedTrack);
+
+      captionTracks.forEach((track, index) => {
+        const optionKey = this.getSubtitleTrackKey(track);
+        const optionId = `subtitle-option-${index}`;
+
+        const label = document.createElement('label');
+        label.style.cssText = 'display: flex; align-items: flex-start; gap: 8px; padding: 8px 10px; border: 1px solid #d9d9d9; border-radius: 8px; cursor: pointer; background: #fff;';
+        label.setAttribute('for', optionId);
+
+        const input = document.createElement('input');
+        input.type = 'radio';
+        input.name = 'subtitle-track';
+        input.value = optionKey;
+        input.id = optionId;
+        input.checked = optionKey === preselectedKey;
+        input.style.cssText = 'margin-top: 4px;';
+
+        const info = document.createElement('div');
+        info.style.cssText = 'display: flex; flex-direction: column; gap: 2px;';
+
+        const mainLabel = document.createElement('span');
+        mainLabel.textContent = this.getSubtitleTrackLabel(track);
+        mainLabel.style.cssText = 'font-size: 14px; font-weight: 500; color: #030303;';
+
+        const secondaryLabel = document.createElement('span');
+        secondaryLabel.textContent = this.getSubtitleTrackDetails(track);
+        secondaryLabel.style.cssText = 'font-size: 12px; color: #606060;';
+
+        info.appendChild(mainLabel);
+        if (secondaryLabel.textContent) {
+          info.appendChild(secondaryLabel);
+        }
+
+        label.appendChild(input);
+        label.appendChild(info);
+        optionsContainer.appendChild(label);
+      });
+
+      const buttonRow = document.createElement('div');
+      buttonRow.style.cssText = 'display: flex; justify-content: flex-end; gap: 8px;';
+      dialog.appendChild(buttonRow);
+
+      const cancelBtn = document.createElement('button');
+      cancelBtn.textContent = 'Cancel';
+      cancelBtn.style.cssText = this.getSubtitleDialogButtonStyle(false);
+      buttonRow.appendChild(cancelBtn);
+
+      const confirmBtn = document.createElement('button');
+      confirmBtn.textContent = 'Use subtitles';
+      confirmBtn.style.cssText = this.getSubtitleDialogButtonStyle(true);
+      buttonRow.appendChild(confirmBtn);
+
+      const cleanup = (): void => {
+        this.removeSubtitleSelectionOverlay();
+      };
+
+      cancelBtn.addEventListener('click', () => {
+        cleanup();
+        reject(new Error(SUBTITLE_SELECTION_CANCELLED));
+      });
+
+      confirmBtn.addEventListener('click', async () => {
+        const selected = dialog.querySelector('input[name="subtitle-track"]:checked') as HTMLInputElement | null;
+        if (!selected) {
+          alert('Please select a subtitle track to continue.');
+          return;
+        }
+
+        const chosen = captionTracks.find((track) => this.getSubtitleTrackKey(track) === selected.value) || captionTracks[0];
+
+        try {
+          await this.saveSubtitlePreference(videoId, this.getSubtitleTrackKey(chosen));
+        } catch (storageError) {
+          console.error('[Practice Controller] Failed to save subtitle preference:', storageError);
+        }
+
+        cleanup();
+        resolve(chosen);
+      });
+
+      overlay.addEventListener('click', (event) => {
+        if (event.target === overlay) {
+          cleanup();
+          reject(new Error(SUBTITLE_SELECTION_CANCELLED));
+        }
+      });
+
+      document.body.appendChild(overlay);
+      this.subtitleSelectionOverlay = overlay;
+    });
+  }
+
+  private getSubtitleTrackLabel(track: CaptionTrack): string {
+    const name = track.name?.simpleText?.trim();
+    if (name && name.length > 0) {
+      return name;
+    }
+
+    return track.languageCode || 'Unknown language';
+  }
+
+  private getSubtitleTrackDetails(track: CaptionTrack): string {
+    const parts: string[] = [];
+
+    if (track.languageCode) {
+      parts.push(track.languageCode);
+    }
+
+    if (track.kind === 'asr') {
+      parts.push('Auto-generated');
+    }
+
+    if (track.vssId) {
+      parts.push(`ID: ${track.vssId}`);
+    }
+
+    return parts.join(' • ');
+  }
+
+  private getSubtitleTrackKey(track: CaptionTrack): string {
+    return track.vssId || track.languageCode || 'default';
+  }
+
+  private async getStoredSubtitlePreference(videoId: string): Promise<string | null> {
+    const key = this.getSubtitlePreferenceKey(videoId);
+    const result = await browser.storage.local.get([key]);
+    return typeof result[key] === 'string' ? (result[key] as string) : null;
+  }
+
+  private async saveSubtitlePreference(videoId: string, trackKey: string): Promise<void> {
+    const key = this.getSubtitlePreferenceKey(videoId);
+    await browser.storage.local.set({ [key]: trackKey });
+  }
+
+  private async clearSubtitlePreference(videoId: string): Promise<void> {
+    const key = this.getSubtitlePreferenceKey(videoId);
+    await browser.storage.local.remove([key]);
+  }
+
+  private getSubtitlePreferenceKey(videoId: string): string {
+    return `subtitle_pref_${videoId}`;
+  }
+
+  private removeSubtitleSelectionOverlay(): void {
+    if (this.subtitleSelectionOverlay) {
+      this.subtitleSelectionOverlay.remove();
+      this.subtitleSelectionOverlay = null;
+    }
+  }
+
+  private getSubtitleOverlayStyle(): string {
+    return `
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100vw;
+      height: 100vh;
+      background: rgba(0, 0, 0, 0.45);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 1000000;
+      padding: 16px;
+    `;
+  }
+
+  private getSubtitleDialogStyle(): string {
+    return `
+      background: #ffffff;
+      padding: 24px;
+      border-radius: 12px;
+      box-shadow: 0 16px 40px rgba(0, 0, 0, 0.2);
+      width: min(420px, 90vw);
+      max-height: 80vh;
+      display: flex;
+      flex-direction: column;
+    `;
+  }
+
+  private getSubtitleDialogButtonStyle(isPrimary: boolean): string {
+    if (isPrimary) {
+      return `
+        background: #065fd4;
+        color: #ffffff;
+        border: none;
+        padding: 8px 16px;
+        border-radius: 20px;
+        font-size: 14px;
+        font-weight: 500;
+        cursor: pointer;
+      `;
+    }
+
+    return `
+      background: transparent;
+      color: #065fd4;
+      border: none;
+      padding: 8px 16px;
+      border-radius: 20px;
+      font-size: 14px;
+      font-weight: 500;
+      cursor: pointer;
+    `;
   }
 
   private async renderFlashcardMode(state: PracticeState): Promise<void> {

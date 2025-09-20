@@ -29,6 +29,8 @@ export interface POTTokenManager {
 export interface CaptionTrack {
   baseUrl: string;
   languageCode: string;
+  vssId?: string;
+  kind?: string;
   name?: {
     simpleText: string;
   };
@@ -63,6 +65,8 @@ interface YouTubePlayerResponse {
 interface CaptionTrack {
   baseUrl: string;
   languageCode: string;
+  vssId?: string;
+  kind?: string;
   name?: {
     simpleText?: string;
   };

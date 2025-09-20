@@ -54,6 +54,23 @@ export class YouTubeHelpers {
     return arr ? JSON.parse(arr[1]) : null;
   }
 
+  static extractDefaultAudioLanguage(html: string): string | null {
+    const defaultAudioMatch = html.match(/"defaultAudioLanguage":"(.*?)"/);
+    if (defaultAudioMatch?.[1]) {
+      console.log('[YouTubeHelpers] Found defaultAudioLanguage:', defaultAudioMatch[1]);
+      return defaultAudioMatch[1];
+    }
+
+    const microformatMatch = html.match(/"playerMicroformatRenderer":\{[^}]*"language":"(.*?)"/);
+    if (microformatMatch?.[1]) {
+      console.log('[YouTubeHelpers] Falling back to microformat language:', microformatMatch[1]);
+      return microformatMatch[1];
+    }
+
+    console.log('[YouTubeHelpers] No default audio language detected in HTML');
+    return null;
+  }
+
   static buildSubtitleUrl(baseUrl: string, poToken: string | null): string {
     return baseUrl + '&pot=' + poToken + '&c=WEB';
   }

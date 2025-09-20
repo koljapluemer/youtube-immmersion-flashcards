@@ -1,4 +1,4 @@
-import type { Card, ReviewLog, FSRS, Grade } from 'ts-fsrs';
+import type { ReviewLog, FSRS, Grade } from 'ts-fsrs';
 import { createEmptyCard, fsrs, Rating } from 'ts-fsrs';
 import type { VocabItem } from '../types/index.js';
 import { VocabCacheManager } from './vocab-cache-manager.js';

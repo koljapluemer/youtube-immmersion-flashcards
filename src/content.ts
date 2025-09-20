@@ -65,6 +65,7 @@ class YouTubePracticeApp {
     // Only re-initialize if we're on a video page and it's a different video
     if (videoId && videoId !== this.currentVideoId) {
       console.log('[YouTube Practice App] New video detected:', videoId);
+      this.practiceController.resetForNewVideo();
       this.currentVideoId = videoId;
 
       // Re-initialize for the new video
