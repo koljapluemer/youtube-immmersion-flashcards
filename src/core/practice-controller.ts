@@ -112,9 +112,13 @@ export class PracticeController {
 
   private async addStartPracticeButton(): Promise<void> {
     try {
-      // Remove existing button
+      // Early return if button already exists in correct location
       const existingButton = document.querySelector('.youtube-practice-button');
       if (existingButton) {
+        const videoTitle = document.querySelector('h1.ytd-watch-metadata yt-formatted-string');
+        if (videoTitle?.parentElement?.contains(existingButton)) {
+          return; // Button already properly placed
+        }
         existingButton.remove();
       }
 
@@ -151,16 +155,6 @@ export class PracticeController {
 
     } catch (error) {
       console.error('[Practice Controller] Failed to add Start Practice button:', error);
-
-      // Retry once after a delay
-      setTimeout(async () => {
-        console.log('[Practice Controller] Retrying button placement...');
-        try {
-          await this.addStartPracticeButton();
-        } catch (retryError) {
-          console.error('[Practice Controller] Button placement retry also failed:', retryError);
-        }
-      }, 2000);
     }
   }
 
